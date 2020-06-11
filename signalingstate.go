@@ -103,6 +103,17 @@ func (t SignalingState) String() string {
 	}
 }
 
+/*状态变化:
+1、如果当前为stable，则set local offer或者set remote offer都会打破当前状态
+2、如果当前have local offer，set remote answer后，推进入stable，反之亦然
+3、相互回复answer时，在确认的local和remote answer之前可能会有pranswer状态，即answer的待定状态，会被之后的pranswer或者answer更新
+4、总的一个大致状态流程
+stable -> setLocal(offer) -> have-local-offer -> setRemote(pranswer) -> setRemote(answer) -> stable
+stable -> setRemote(offer) -> have-remote-offer -> setLocal(pranswer) -> setLocal(answer) -> stable
+
+ */
+
+
 func checkNextSignalingState(cur, next SignalingState, op stateChangeOp, sdpType SDPType) (SignalingState, error) {
 	// Special case for rollbacks
 	if sdpType == SDPTypeRollback && cur == SignalingStateStable {
@@ -112,6 +123,7 @@ func checkNextSignalingState(cur, next SignalingState, op stateChangeOp, sdpType
 	}
 
 	// 4.3.1 valid state transitions
+	//特别说明: pranswer: provisional answer，非最终 answer，之后可能被 pranswer 或 answer 更新
 	switch cur {
 	case SignalingStateStable:
 		switch op {
@@ -135,6 +147,7 @@ func checkNextSignalingState(cur, next SignalingState, op stateChangeOp, sdpType
 					return next, nil
 				}
 			// have-local-offer->SetRemote(pranswer)->have-remote-pranswer
+			//remote返回一个provisional answer，非最终answer
 			case SDPTypePranswer:
 				if next == SignalingStateHaveRemotePranswer {
 					return next, nil
@@ -142,6 +155,7 @@ func checkNextSignalingState(cur, next SignalingState, op stateChangeOp, sdpType
 			}
 		}
 	case SignalingStateHaveRemotePranswer:
+		//remote的provisional answer最终被answer更新后，进入stable
 		if op == stateChangeOpSetRemote && sdpType == SDPTypeAnswer {
 			// have-remote-pranswer->SetRemote(answer)->stable
 			if next == SignalingStateStable {
@@ -157,6 +171,7 @@ func checkNextSignalingState(cur, next SignalingState, op stateChangeOp, sdpType
 					return next, nil
 				}
 			// have-remote-offer->SetLocal(pranswer)->have-local-pranswer
+			//local也存在provisional answer，需要等待进一步状态更新
 			case SDPTypePranswer:
 				if next == SignalingStateHaveLocalPranswer {
 					return next, nil

@@ -598,6 +598,7 @@ func (pc *PeerConnection) CreateAnswer(options *AnswerOptions) (SessionDescripti
 }
 
 // 4.4.1.6 Set the SessionDescription
+//详细state相关注释见checkNextSignalingState函数
 func (pc *PeerConnection) setDescription(sd *SessionDescription, op stateChangeOp) error {
 	if pc.isClosed.get() {
 		return &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
@@ -615,6 +616,12 @@ func (pc *PeerConnection) setDescription(sd *SessionDescription, op stateChangeO
 
 		var nextState SignalingState
 		var err error
+		//所有注释为: 当前状态 -> 将要执行的操作 -> 执行完操作后的状态
+		//如果执行结束后状态为stable，则将该sd设置到currentRemoteDescription/currentLocalDescription
+		//否则都设置到pendingRemoteDescription/pendingLocalDescription
+		//一旦执行rollback回滚，currentRemoteDescription/currentLocalDescription都回到nil
+		//即同时搜集完offer和answer才属于stable状态，否则都属于pending状态
+		//pending状态包括只搜集到offer，或者offer+pranswer
 		switch op {
 		case setLocal:
 			switch sd.Type {
@@ -782,6 +789,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if err := desc.parsed.Unmarshal([]byte(desc.SDP)); err != nil {
 		return err
 	}
+	//根据当前状态和将要执行的动作，决定下一个状态是否为stable，从而决定该session description是存储到pending(Remote/Local)Description还是正式current(Remote/Local)Description
 	if err := pc.setDescription(&desc, stateChangeOpSetRemote); err != nil {
 		return err
 	}
@@ -808,11 +816,14 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 			if kind == 0 || direction == RTPTransceiverDirection(Unknown) {
 				continue
 			}
-
+			//根据midValue匹配
 			t, localTransceivers = findByMid(midValue, localTransceivers)
 			if t == nil {
+				//进一步再根据RTPCodecType(audio/video)和传输方向匹配
 				t, localTransceivers = satisfyTypeAndDirection(kind, direction, localTransceivers)
 			}
+			//如果匹配到合适的，生成RTPReceiver和RTPTransceiver
+			//疑问???: Transceivers如何得到以及其作用
 			if t == nil {
 				receiver, err := pc.api.NewRTPReceiver(kind, pc.dtlsTransport)
 				if err != nil {
@@ -825,7 +836,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 			}
 		}
 	}
-
+	//如果已经有RemoteDescription并且我方Offer已经完毕，说明双方candidate搜集完毕，开始打洞
 	if haveRemoteDescription {
 		if weOffer {
 			pc.ops.Enqueue(func() {
