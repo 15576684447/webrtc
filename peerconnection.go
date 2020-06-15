@@ -1696,6 +1696,7 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 
 func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDescription) {
 	currentTransceivers := append([]*RTPTransceiver{}, pc.GetTransceivers()...)
+	//根据ssrc, ssrc-group获取真实的track信息与流信息，并去除重传ssrc
 	trackDetails := trackDetailsFromSDP(pc.log, remoteDesc.parsed)
 	if isRenegotiation {
 		for _, t := range currentTransceivers {
