@@ -119,6 +119,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 
 	var iceConn *ice.Conn
 	var err error
+	//这里会进行连通性测试
 	switch *role {
 	case ICERoleControlling:
 		iceConn, err = agent.Dial(context.TODO(),
@@ -231,21 +232,24 @@ func (t *ICETransport) SetRemoteCandidates(remoteCandidates []ICECandidate) erro
 func (t *ICETransport) AddRemoteCandidate(remoteCandidate ICECandidate) error {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
-
+	//确认Gatherer Agent是否存在，如果不存在，则新建一个
+	//agent用于搜集Local candidate
 	if err := t.ensureGatherer(); err != nil {
 		return err
 	}
-
+	//根据remoteCandidate类型生成不同的ICE Candidate结构体
+	//CandidateHost、CandidateServerReflexive、CandidatePeerReflexive、CandidateRelay
 	c, err := remoteCandidate.toICE()
 	if err != nil {
 		return err
 	}
-
+	//agent模块实际存储了已经获取到的Local candidate
 	agent := t.gatherer.getAgent()
 	if agent == nil {
 		return errors.New("ICEAgent does not exist, unable to add remote candidates")
 	}
-
+	//根据网络类型存储remoteCandidate到agent模块，如果已经存在，则跳过
+	//将该remoteCandidate与其类型相同的localCandidate组成新的pair对，加入到后续的连通性测试
 	err = agent.AddRemoteCandidate(c)
 	if err != nil {
 		return err

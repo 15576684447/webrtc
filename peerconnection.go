@@ -845,8 +845,11 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 		}
 		return nil
 	}
-
+	//ICE模式分为 FULL ICE和Lite ICE
+	//FULL ICE:双方都要进行连通性检查，完整地走一遍流程
+	//Lite ICE: 在FULL ICE和Lite ICE互通时，只需要FULL ICE一方进行连通性检查，Lite一方只需回应response消息。这种模式对于部署在公网的设备比较常用。
 	remoteIsLite := false
+	//根据remoteSDP，判断remote的ICE模式是否为Lite模式
 	if liteValue, haveRemoteIs := desc.parsed.Attribute(sdp.AttrKeyICELite); haveRemoteIs && liteValue == sdp.AttrKeyICELite {
 		remoteIsLite = true
 	}
@@ -860,13 +863,15 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if err != nil {
 		return err
 	}
-
+	//遍历remoteSDP中的candidates,将remoteCandidate与同网络类型的LocalCandidate组成pair，进行连通性测试
 	for _, c := range candidates {
 		if err = pc.iceTransport.AddRemoteCandidate(c); err != nil {
 			return err
 		}
 	}
-
+	//ICE角色分为controlling和controlled，controlling为
+	//如果其中一方ICE为Lite模式，另一方是Full模式，则Full方为controlling agent角色
+	//如果双方是相同的角色，Offer一方为controlling角色，answer一方为controlled角色
 	iceRole := ICERoleControlled
 	// If one of the agents is lite and the other one is not, the lite agent must be the controlling agent.
 	// If both or neither agents are lite the offering agent is controlling.
@@ -878,6 +883,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	// Start the networking in a new routine since it will block until
 	// the connection is actually established.
 	pc.ops.Enqueue(func() {
+		//进行连通性测试，需要重点阅读解析
 		pc.startTransports(iceRole, dtlsRoleFromRemoteSDP(desc.parsed), remoteUfrag, remotePwd, fingerprint, fingerprintHash)
 		if weOffer {
 			pc.startRTP(false, &desc)

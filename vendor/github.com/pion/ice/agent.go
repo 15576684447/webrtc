@@ -783,6 +783,7 @@ func (a *Agent) checkKeepalive() {
 // AddRemoteCandidate adds a new remote candidate
 func (a *Agent) AddRemoteCandidate(c Candidate) error {
 	// If we have a mDNS Candidate lets fully resolve it before adding it locally
+	//如果是Host Candidate，由于其可能以域名的方式出现，所以特殊处理，通过解析DNS后获取真实IP后处理
 	if c.Type() == CandidateTypeHost && strings.HasSuffix(c.Address(), ".local") {
 		if a.mDNSMode == MulticastDNSModeDisabled {
 			a.log.Warnf("remote mDNS candidate added, but mDNS is disabled: (%s)", c.Address())
@@ -846,6 +847,8 @@ func (a *Agent) requestConnectivityCheck() {
 }
 
 // addRemoteCandidate assumes you are holding the lock (must be execute using a.run)
+//根据网络类型存储remoteCandidate，如果已经存在，则跳过
+//将该remoteCandidate与其类型相同的localCandidate组成新的pair对，加入到连通性测试
 func (a *Agent) addRemoteCandidate(c Candidate) {
 	set := a.remoteCandidates[c.NetworkType()]
 
