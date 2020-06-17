@@ -215,8 +215,9 @@ func Server(config Config) (*Association, error) {
 // Client opens a SCTP stream over a conn
 func Client(config Config) (*Association, error) {
 	a := createAssociation(config)
+	//初始化sctp，进行四次握手初始化
 	a.init(true)
-
+	//sctp握手成功后，handshakeCompletedCh <- nil
 	select {
 	case err := <-a.handshakeCompletedCh:
 		if err != nil {
@@ -294,12 +295,15 @@ func createAssociation(config Config) *Association {
 func (a *Association) init(isClient bool) {
 	a.lock.Lock()
 	defer a.lock.Unlock()
-
+	//接收处理数据，完成整个握手过程
 	go a.readLoop()
-	go a.writeLoop()
+	go a.writeLoop()//发送队列中的packet
 
 	if isClient {
-		a.setState(cookieWait)
+		a.setState(cookieWait)//发送Init包后，进入等待对方Init Ack阶段，该Ack会携带对方的Cookie
+		//sctp第一个握手包:Init包
+		//启动标签:随机数
+		//该端最大输入输出流量
 		init := &chunkInit{}
 		init.initialTSN = a.myNextTSN
 		init.numOutboundStreams = a.myMaxNumOutboundStreams
@@ -308,12 +312,12 @@ func (a *Association) init(isClient bool) {
 		init.advertisedReceiverWindowCredit = a.maxReceiveBufferSize
 		setSupportedExtensions(&init.chunkInitCommon)
 		a.storedInit = init
-
+		//将Init数据填充进packet等待发送
 		err := a.sendInit()
 		if err != nil {
 			a.log.Errorf("[%s] failed to send init: %s", a.name, err.Error())
 		}
-
+		//开启Init发送定时器，并传入重传超时时间，发送失败后自动重传，重传时间根据重传次数递增
 		a.t1Init.start(a.rtoMgr.getRTO())
 	}
 }
@@ -1990,10 +1994,10 @@ func (a *Association) handleChunk(p *packet, c chunk) error {
 	}
 
 	switch c := c.(type) {
-	case *chunkInit:
+	case *chunkInit://作为server时，处理client的Init包，需要回复Init Ack
 		packets, err = a.handleInit(p, c)
 
-	case *chunkInitAck:
+	case *chunkInitAck://作为client时，处理server端回复的Init Ack，需要回复Cookie Echo
 		err = a.handleInitAck(p, c)
 
 	case *chunkAbort:
@@ -2010,13 +2014,13 @@ func (a *Association) handleChunk(p *packet, c chunk) error {
 		}
 		a.log.Debugf("[%s] Error chunk, with following errors: %s", a.name, errStr)
 
-	case *chunkHeartbeat:
+	case *chunkHeartbeat://收到心跳后回复心跳
 		packets = a.handleHeartbeat(c)
 
-	case *chunkCookieEcho:
+	case *chunkCookieEcho://作为server时，处理client端的Cookie Echo，需要回复Cookie Ack，此时server端认为握手成功
 		packets = a.handleCookieEcho(c)
 
-	case *chunkCookieAck:
+	case *chunkCookieAck://作为client时，处理server端回复的Cookie Ack，此时client端认为握手成功，state=established
 		packets = a.handleCookieAck()
 
 	case *chunkPayloadData:
