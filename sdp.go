@@ -62,8 +62,10 @@ func trackDetailsFromSDP(log logging.LeveledLogger, s *sdp.SessionDescription) m
 			a=ssrc:1461041037 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C ead4b4e9-b650-4ed5-86f8-6f5f5806346d
 			a=ssrc:1461041037 mslabel:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C
 			a=ssrc:1461041037 label:ead4b4e9-b650-4ed5-86f8-6f5f5806346d
-
 			*/
+			/*
+			虽然PlanB模式和UnifiedPlan模式对于流组织方式不太一样，但是其ssrc属性是类似的，可以从ssrc属性中得知sdp中包含的所有track信息
+			 */
 			switch attr.Key {
 			case sdp.AttrKeySSRCGroup://ssrc-group
 				split := strings.Split(attr.Value, " ")

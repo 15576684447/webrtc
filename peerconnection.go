@@ -887,6 +887,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 }
 
 func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPReceiver) {
+	//获取RTPReceiver的rtpReadStream/rtcpReadStream
 	err := receiver.Receive(RTPReceiveParameters{
 		Encodings: RTPDecodingParameters{
 			RTPCodingParameters{SSRC: incoming.ssrc},
@@ -898,12 +899,14 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 
 	// set track id and label early so they can be set as new track information
 	// is received from the SDP.
+	//设置track的track_id和stream_id
 	receiver.Track().mu.Lock()
 	receiver.Track().id = incoming.id
 	receiver.Track().label = incoming.label
 	receiver.Track().mu.Unlock()
 
 	go func() {
+		//通过读取一个pkt来决定其payload类型
 		if err = receiver.Track().determinePayloadType(); err != nil {
 			pc.log.Warnf("Could not determine PayloadType for SSRC %d", receiver.Track().SSRC())
 			return
@@ -911,18 +914,18 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 
 		pc.mu.RLock()
 		defer pc.mu.RUnlock()
-
+		//获取解码器
 		codec, err := pc.api.mediaEngine.getCodec(receiver.Track().PayloadType())
 		if err != nil {
 			pc.log.Warnf("no codec could be found for payloadType %d", receiver.Track().PayloadType())
 			return
 		}
-
+		//添加track的解码器信息
 		receiver.Track().mu.Lock()
 		receiver.Track().kind = codec.Type
 		receiver.Track().codec = codec
 		receiver.Track().mu.Unlock()
-
+		//如果注册了onTrackHandler，则handle该track
 		if pc.onTrackHandler != nil {
 			pc.onTrack(receiver.Track(), receiver)
 		} else {
@@ -934,12 +937,15 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 // startRTPReceivers opens knows inbound SRTP streams from the RemoteDescription
 func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetails, currentTransceivers []*RTPTransceiver) {
 	localTransceivers := append([]*RTPTransceiver{}, currentTransceivers...)
-
+	//判断是SDP格式是PlanB还是UnifiedPlan模式
 	remoteIsPlanB := false
 	switch pc.configuration.SDPSemantics {
 	case SDPSemanticsPlanB:
 		remoteIsPlanB = true
 	case SDPSemanticsUnifiedPlanWithFallback:
+		//PlanB所有audio track共用一个m=audio，所有video track共用一个m=video，就是说每个m标签包含一个或多个同类track
+		//UnifiedPlan每个track对应一个m标签
+		//目前是从PlanB过渡到UnifiedPlan
 		remoteIsPlanB = descriptionIsPlanB(pc.RemoteDescription())
 	}
 
@@ -949,11 +955,13 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 			if t := localTransceivers[i]; (t.Receiver()) == nil || t.Receiver().Track() == nil || t.Receiver().Track().ssrc != ssrc {
 				continue
 			}
-
+			//确认incomingTracks中ssrc都没有开启transceiver，如果开启了，则从incomingTracks移除对应的ssrc
 			delete(incomingTracks, ssrc)
 		}
 	}
-
+	//剩余incomingTracks中的ssrc都是未开启transceiver的
+	//查找transceiver中mid(媒体类型/audio/video)、kind(解码器类型)等与incomingTracks中ssrc一致的
+	//在peerConnection中开始该ssrc的接收器(pc.startReceiver)
 	for ssrc, incoming := range incomingTracks {
 		for i := range localTransceivers {
 			t := localTransceivers[i]
@@ -1699,27 +1707,31 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 	//根据ssrc, ssrc-group获取真实的track信息与流信息，并去除重传ssrc
 	trackDetails := trackDetailsFromSDP(pc.log, remoteDesc.parsed)
 	if isRenegotiation {
+		//Transceivers作为收发器，既包含Sender，也包含Receiver，对于LocalSDP，其描述的Sender部分
+		//对于RemoteSDP，其描述的是Receiver部分，所以此处主要检查Receiver部分逻辑
 		for _, t := range currentTransceivers {
+			//空的Receiver
 			if t.Receiver() == nil || t.Receiver().Track() == nil {
 				continue
 			}
 
 			t.Receiver().Track().mu.Lock()
 			ssrc := t.Receiver().Track().ssrc
+			//该Receiver对应的ssrc在trackDetails中有对应存在，则将该trackDetails属性设置到对应的Receiver().Track()中
 			if _, ok := trackDetails[ssrc]; ok {
 				incoming := trackDetails[ssrc]
-				t.Receiver().Track().id = incoming.id
-				t.Receiver().Track().label = incoming.label
+				t.Receiver().Track().id = incoming.id//track_id
+				t.Receiver().Track().label = incoming.label//stream_id
 				t.Receiver().Track().mu.Unlock()
 				continue
 			}
 			t.Receiver().Track().mu.Unlock()
-
+			//如果Receiver不空，并且也不在已知的trackDetails范围内，则先Stop，再重建一个对应的Receiver
 			if err := t.Receiver().Stop(); err != nil {
 				pc.log.Warnf("Failed to stop RtpReceiver: %s", err)
 				continue
 			}
-
+			//重建Receiver
 			receiver, err := pc.api.NewRTPReceiver(t.Receiver().kind, pc.dtlsTransport)
 			if err != nil {
 				pc.log.Warnf("Failed to create new RtpReceiver: %s", err)
@@ -1734,6 +1746,7 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 
 	if !isRenegotiation {
 		pc.drainSRTP()
+		//m=application 使用datachannel传输
 		if haveApplicationMediaSection(remoteDesc.parsed) {
 			pc.startSCTP()
 		}

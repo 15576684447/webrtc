@@ -74,7 +74,9 @@ func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error {
 		ssrc:     parameters.Encodings.SSRC,
 		receiver: r,
 	}
-
+	//获取RTPReceiver的SRTPSession/SRTCPSession/rtpReadStream/rtcpReadStream
+	//一个Session包括一个WriteStream和若干个ReadStreams
+	//读取的数据放在ReadStream的buffer中
 	srtpSession, err := r.transport.getSRTPSession()
 	if err != nil {
 		return err
