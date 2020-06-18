@@ -446,6 +446,7 @@ func NewAgent(config *AgentConfig) (*Agent, error) {
 
 	// Initialize local candidates
 	if !a.trickle {
+		//开始收集Candidate，重要入口!!!
 		<-a.gatherCandidates()
 	}
 	return a, nil
@@ -608,15 +609,17 @@ func (a *Agent) startConnectivityChecks(isControlling bool, remoteUfrag, remoteP
 		if a.lite {
 			a.selector = &liteSelector{pairCandidateSelector: a.selector}
 		}
-
+		//该函数是最后触发的函数，新建了单独的协程，agent->done或者超时后才执行
 		a.selector.Start()
-
+		//此处开始chack state
 		agent.updateConnectionState(ConnectionStateChecking)
 
 		// TODO this should be dynamic, and grow when the connection is stable
+		//此处设置会使得进入下面的for循环后立刻执行contact，而无需等到connectivityTicker溢出
 		a.requestConnectivityCheck()
+		//设置一个定时器，周期性执行contact
 		agent.connectivityTicker = time.NewTicker(a.taskLoopInterval)
-
+		//周期性执行contact
 		go func() {
 			contact := func() {
 				if err := a.run(func(a *Agent) {
@@ -654,8 +657,9 @@ func (a *Agent) updateConnectionState(newState ConnectionState) {
 func (a *Agent) setSelectedPair(p *candidatePair) {
 	a.log.Tracef("Set selected candidate pair: %s", p)
 	// Notify when the selected pair changes
+	//通知Selected Pair发生了改变
 	a.onSelectedCandidatePairChange(p)
-
+	//设置nominated状态为true，即提名成功，并设置该candidatePair到selectedPair
 	if p != nil {
 		p.nominated = true
 		a.selectedPair.Store(p)
@@ -663,7 +667,7 @@ func (a *Agent) setSelectedPair(p *candidatePair) {
 		var nilPair *candidatePair
 		a.selectedPair.Store(nilPair)
 	}
-
+	//ICE正式连接成功
 	a.updateConnectionState(ConnectionStateConnected)
 
 	// Close mDNS Conn. We don't need to do anymore querying
@@ -872,10 +876,12 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 
 func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 	return a.run(func(agent *Agent) {
+		//start函数为该Candidate启动了专属recvLoop，专门用于处理接收该Candidate的消息(handleInboundCandidateMsg)
+		//根据收到的消息，判断当前Binding结果是否成功，提名是否成功
 		c.start(a, candidateConn)
 
 		set := a.localCandidates[c.NetworkType()]
-		for _, candidate := range set {
+		for _, candidate := range set {x
 			if candidate.Equal(c) {
 				if err := c.close(); err != nil {
 					a.log.Warnf("Failed to close duplicate candidate: %v", err)
@@ -1023,11 +1029,13 @@ func (a *Agent) sendBindingSuccess(m *stun.Message, local, remote Candidate) {
    RTT is known or 500 ms otherwise.
    https://tools.ietf.org/html/rfc8445#appendix-B.1
 */
+//移除超时的PendingBinding
 func (a *Agent) invalidatePendingBindingRequests(filterTime time.Time) {
 	initialSize := len(a.pendingBindingRequests)
 
 	temp := a.pendingBindingRequests[:0]
 	for _, bindingRequest := range a.pendingBindingRequests {
+		//使用当前操作时间戳减去上次bindingRequest.timestamp，如果超时，则移除对应PendingBinding
 		if filterTime.Sub(bindingRequest.timestamp) < maxBindingRequestTimeout {
 			temp = append(temp, bindingRequest)
 		}
@@ -1041,6 +1049,8 @@ func (a *Agent) invalidatePendingBindingRequests(filterTime time.Time) {
 
 // Assert that the passed TransactionID is in our pendingBindingRequests and returns the destination
 // If the bindingRequest was valid remove it from our pending cache
+//首先移除超时的PendingBinding
+//然后从中找到ID匹配的PendingBinding，作为有效的返回
 func (a *Agent) handleInboundBindingSuccess(id [stun.TransactionIDSize]byte) (bool, *bindingRequest) {
 	a.invalidatePendingBindingRequests(time.Now())
 	for i := range a.pendingBindingRequests {
@@ -1084,6 +1094,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 	}
 
 	remoteCandidate := a.findRemoteCandidate(local.NetworkType(), remote)
+	//如果是Response，调用HandleSuccessResponse函数
 	if m.Type.Class == stun.ClassSuccessResponse {
 		if err = assertInboundMessageIntegrity(m, []byte(a.remotePwd)); err != nil {
 			a.log.Warnf("discard message from (%s), %v", remote, err)
@@ -1094,9 +1105,10 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 			a.log.Warnf("discard success message from (%s), no such remote", remote)
 			return
 		}
-
+		//核心函数!!!
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
+		//如果是Request，调用HandleBindingRequest函数
 		if err = assertInboundUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
 			a.log.Warnf("discard message from (%s), %v", remote, err)
 			return
@@ -1133,7 +1145,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		}
 
 		a.log.Tracef("inbound STUN (Request) from %s to %s", remote.String(), local.String())
-
+		//核心函数!!!
 		a.selector.HandleBindingRequest(m, local, remoteCandidate)
 	}
 

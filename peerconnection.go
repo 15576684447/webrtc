@@ -1682,6 +1682,7 @@ func (pc *PeerConnection) GetStats() StatsReport {
 // Start all transports. PeerConnection now has enough state
 func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, remoteUfrag, remotePwd, fingerprint, fingerprintHash string) {
 	// Start the ice transport
+	//ice连接用到用户名和密码
 	err := pc.iceTransport.Start(
 		pc.iceGatherer,
 		ICEParameters{
@@ -1695,7 +1696,7 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 		pc.log.Warnf("Failed to start manager: %s", err)
 		return
 	}
-
+	//dtls连接用到了加密信息
 	// Start the dtls transport
 	err = pc.dtlsTransport.Start(DTLSParameters{
 		Role:         dtlsRole,

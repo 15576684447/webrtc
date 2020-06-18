@@ -108,7 +108,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 			return
 		}
 		<-gatherStateUpdated
-
+		//3中gatherCandidatesxxx是重点!!! 底层统一调用了agent.addCandidate函数
 		for _, t := range a.candidateTypes {
 			switch t {
 			case CandidateTypeHost:
@@ -187,7 +187,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 					continue
 				}
 			}
-
+			//此处是重点，每次增加一个Candidate，就为其新建一个专属recvLoop，专门接收并处理该连接上的消息!!!
 			if err := a.addCandidate(c, conn); err != nil {
 				if closeErr := c.close(); closeErr != nil {
 					a.log.Warnf("Failed to close candidate: %v", closeErr)
