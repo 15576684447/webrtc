@@ -240,12 +240,12 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 		return nil, fmt.Errorf("only one Allocate() caller is allowed: %s", err.Error())
 	}
 	defer c.allocTryLock.Unlock()
-
+	//获取relay conn
 	relayedConn := c.relayedUDPConn()
 	if relayedConn != nil {
 		return nil, fmt.Errorf("already allocated at %s", relayedConn.LocalAddr().String())
 	}
-
+	//构建TURN allocation request
 	msg, err := stun.Build(
 		stun.TransactionID,
 		stun.NewType(stun.MethodAllocate, stun.ClassRequest),
@@ -255,7 +255,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	//发送TURN allocation request
 	trRes, err := c.PerformTransaction(msg, c.turnServ, false)
 	if err != nil {
 		return nil, err
@@ -276,6 +276,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 		c.username.String(), c.realm.String(), c.password,
 	)
 	// Trying to authorize.
+	//构建TURN allocation认证
 	msg, err = stun.Build(
 		stun.TransactionID,
 		stun.NewType(stun.MethodAllocate, stun.ClassRequest),
@@ -289,7 +290,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	//发送TURN allocation认证
 	trRes, err = c.PerformTransaction(msg, c.turnServ, false)
 	if err != nil {
 		return nil, err
@@ -305,6 +306,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 	}
 
 	// Getting relayed addresses from response.
+	//从response中获取relay 服务器地址
 	var relayed proto.RelayedAddress
 	if err := relayed.GetFrom(res); err != nil {
 		return nil, err
@@ -315,11 +317,13 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 	}
 
 	// Getting lifetime from response
+	//从response中返回Lifetime
 	var lifetime proto.Lifetime
 	if err := lifetime.GetFrom(res); err != nil {
 		return nil, err
 	}
-
+	//RelayConn主要由relayedAddr和lifetime构成
+	//当allocation创建后需要使用refresh request来保活，默认lifetime为10分钟
 	relayedConn = client.NewUDPConn(&client.UDPConnConfig{
 		Observer:    c,
 		RelayedAddr: relayedAddr,

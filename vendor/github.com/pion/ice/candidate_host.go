@@ -43,13 +43,14 @@ func NewCandidateHost(config *CandidateHostConfig) (*CandidateHost, error) {
 		},
 		network: config.Network,
 	}
-
+	//如果Local private IP使用mDNS方式管理，则会携带".local"后缀；否则直接为IP地址
+	//如果先按照mDNS方式解析，失败后按照IP解析
 	if !strings.HasSuffix(config.Address, ".local") {
 		ip := net.ParseIP(config.Address)
 		if ip == nil {
 			return nil, ErrAddressParseFailed
 		}
-
+		//设置真实IP
 		if err := c.setIP(ip); err != nil {
 			return nil, err
 		}

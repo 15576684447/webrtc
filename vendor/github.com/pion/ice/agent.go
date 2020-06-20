@@ -419,12 +419,12 @@ func NewAgent(config *AgentConfig) (*Agent, error) {
 	// NOTE: We actually won't get anywhere close to this limit.
 	// SRTP will constantly read from the endpoint and drop packets if it's full.
 	a.buffer.SetLimitSize(maxBufferSize)
-
+	//如果ICE是Lite模式，类型又不是CandidateTypeHost，则类型不匹配
 	if a.lite && (len(a.candidateTypes) != 1 || a.candidateTypes[0] != CandidateTypeHost) {
 		closeMDNSConn()
 		return nil, ErrLiteUsingNonHostCandidates
 	}
-
+	//如果指定URL(用于获取主机外网IP的服务器地址)，但是类型又不包含CandidateTypeServerReflexive或CandidateTypeRelay，则类型不匹配
 	if config.Urls != nil && len(config.Urls) > 0 && !containsCandidateType(CandidateTypeServerReflexive, a.candidateTypes) && !containsCandidateType(CandidateTypeRelay, a.candidateTypes) {
 		closeMDNSConn()
 		return nil, ErrUselessUrlsProvided
@@ -515,7 +515,7 @@ func (a *Agent) initWithDefaults(config *AgentConfig) {
 		a.candidateTypes = config.CandidateTypes
 	}
 }
-
+//初始化IP映射
 func (a *Agent) initExtIPMapping(config *AgentConfig) error {
 	var err error
 	a.extIPMapper, err = newExternalIPMapper(config.NAT1To1IPCandidateType, config.NAT1To1IPs)
@@ -525,6 +525,7 @@ func (a *Agent) initExtIPMapping(config *AgentConfig) error {
 	if a.extIPMapper == nil {
 		return nil // this may happen when config.NAT1To1IPs is an empty array
 	}
+	//IP映射类型要与具体的Candidate类型匹配，否则返回错误
 	if a.extIPMapper.candidateType == CandidateTypeHost {
 		if a.mDNSMode == MulticastDNSModeQueryAndGather {
 			return ErrMulticastDNSWithNAT1To1IPMapping

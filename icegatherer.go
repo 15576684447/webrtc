@@ -63,6 +63,8 @@ func (g *ICEGatherer) createAgent() error {
 	}
 
 	candidateTypes := []ice.CandidateType{}
+	//如果ICE是Lite模式,则ICE Candidate类型为CandidateTypeHost
+	//在FULL ICE和Lite ICE互通时，只需要FULL ICE一方进行连通性检查， Lite一方只需回应response消息
 	if g.api.settingEngine.candidates.ICELite {
 		candidateTypes = append(candidateTypes, ice.CandidateTypeHost)
 	} else if g.gatherPolicy == ICETransportPolicyRelay {

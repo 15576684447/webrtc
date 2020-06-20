@@ -108,17 +108,22 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 			return
 		}
 		<-gatherStateUpdated
-		//3中gatherCandidatesxxx是重点!!! 底层统一调用了agent.addCandidate函数
+		//3种gatherCandidatesxxx是重点!!! 底层统一调用了agent.addCandidate函数
 		for _, t := range a.candidateTypes {
 			switch t {
 			case CandidateTypeHost:
 				a.gatherCandidatesLocal(a.networkTypes)
 			case CandidateTypeServerReflexive:
+				//通过指定STUN服务器地址来获取外部IP
+				//ICE利用STUN（RFC5389） Binding Request和Response，来获取公网映射地址和进行连通性检查。
 				a.gatherCandidatesSrflx(a.urls, a.networkTypes)
+				//如果指定IPMapper
 				if a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeServerReflexive {
 					a.gatherCandidatesSrflxMapped(a.networkTypes)
 				}
 			case CandidateTypeRelay:
+				//ICE使用TURN（RFC 5766）协议作为STUN的辅助，在点对点穿越失败的情况下，借助于TURN服务的转发功能，来实现互通。
+				//TURN消息都遵循 STUN 的消息格式，除了ChannelData消息。
 				if err := a.gatherCandidatesRelay(a.urls); err != nil {
 					a.log.Errorf("Failed to gather relay candidates: %v\n", err)
 				}
@@ -147,6 +152,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 
 	for _, ip := range localIPs {
 		mappedIP := ip
+		//如果caididate搜集端和接收端不同时支持mDNS域名模式，解析ip地址对应的外网IP
 		if a.mDNSMode != MulticastDNSModeQueryAndGather && a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeHost {
 			if _mappedIP, err := a.extIPMapper.findExternalIP(ip.String()); err == nil {
 				mappedIP = _mappedIP
@@ -156,6 +162,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 		}
 
 		address := mappedIP.String()
+		//如果caididate搜集端和接收端都支持mDNS域名模式，直接使用域名
 		if a.mDNSMode == MulticastDNSModeQueryAndGather {
 			address = a.mDNSName
 		}
@@ -180,7 +187,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 				closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create host candidate: %s %s %d: %v\n", network, mappedIP, port, err))
 				continue
 			}
-
+			//如果是mDNS模式，需要设置真实IP
 			if a.mDNSMode == MulticastDNSModeQueryAndGather {
 				if err = c.setIP(ip); err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create host candidate: %s %s %d: %v\n", network, mappedIP, port, err))
@@ -387,7 +394,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				a.log.Warnf("Unable to handle URL in gatherCandidatesRelay %v\n", url)
 				return
 			}
-
+			//创建turn客户端
 			client, err := turn.NewClient(&turn.ClientConfig{
 				TURNServerAddr: TURNServerAddr,
 				Conn:           locConn,
@@ -437,7 +444,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				closeConnAndLog(locConn, a.log, fmt.Sprintf("Failed to create relay candidate: %s %s: %v\n", network, raddr.String(), err))
 				return
 			}
-
+			//turn relay模式下，获取的是turn的candidate
 			if err := a.addCandidate(candidate, relayConn); err != nil {
 				if closeErr := candidate.close(); closeErr != nil {
 					a.log.Warnf("Failed to close candidate: %v", closeErr)
