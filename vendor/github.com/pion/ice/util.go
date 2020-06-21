@@ -107,6 +107,7 @@ func getXORMappedAddr(conn net.PacketConn, serverAddr net.Addr, deadline time.Du
 			_ = conn.SetReadDeadline(time.Time{})
 		}
 	}()
+	//发送stunRequest到STUN服务器，并在本地conn监听
 	resp, err := stunRequest(
 		func(p []byte) (int, error) {
 			n, _, errr := conn.ReadFrom(p)
@@ -119,6 +120,7 @@ func getXORMappedAddr(conn net.PacketConn, serverAddr net.Addr, deadline time.Du
 	if err != nil {
 		return nil, err
 	}
+	//获取STUN response的XOR-MAPPED-address属性，即为NAT映射结果
 	var addr stun.XORMappedAddress
 	if err = addr.GetFrom(resp); err != nil {
 		return nil, fmt.Errorf("failed to get XOR-MAPPED-ADDRESS response: %v", err)

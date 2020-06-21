@@ -321,7 +321,7 @@ func (a *Agent) gatherCandidatesSrflx(urls []*URL, networkTypes []NetworkType) {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to listen for %s: %v\n", serverAddr.String(), err))
 					return
 				}
-
+				//请求STUN服务器，并解析返回数据包的XOR-MAPPED-address属性，获取映射公网IP
 				xoraddr, err := getXORMappedAddr(conn, serverAddr, stunGatherTimeout)
 				if err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("could not get server reflexive address %s %s: %v\n", network, url, err))
@@ -384,8 +384,13 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				RelAddr string
 				RelPort int
 			)
-
+			/*
+			虽然TURN允许使用UDP、TCP或TLS（Transport Layer Security）中的任何一个在客户端和服务器之间传送TURN消息，
+			但是TURN在服务器和对端之间总是采用UDP进行数据传输。
+			 */
+			//根据Proto与Scheme创建与STUN服务器对应的连接
 			switch {
+			//客户端与TURN服务器采用UDP发送消息
 			case url.Proto == ProtoTypeUDP && url.Scheme == SchemeTypeTURN:
 				if locConn, err = a.net.ListenPacket(network, "0.0.0.0:0"); err != nil {
 					a.log.Warnf("Failed to listen %s: %v\n", network, err)
@@ -394,6 +399,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 
 				RelAddr = locConn.LocalAddr().(*net.UDPAddr).IP.String()
 				RelPort = locConn.LocalAddr().(*net.UDPAddr).Port
+			//客户端与TURN服务器采用TCP发送消息
 			case url.Proto == ProtoTypeTCP && url.Scheme == SchemeTypeTURN:
 				tcpAddr, connectErr := net.ResolveTCPAddr(NetworkTypeTCP4.String(), TURNServerAddr)
 				if connectErr != nil {
@@ -410,6 +416,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				RelAddr = conn.LocalAddr().(*net.TCPAddr).IP.String()
 				RelPort = conn.LocalAddr().(*net.TCPAddr).Port
 				locConn = turn.NewSTUNConn(conn)
+			//客户端与TURN服务器采用UDP+DTLS发送消息
 			case url.Proto == ProtoTypeUDP && url.Scheme == SchemeTypeTURNS:
 				udpAddr, connectErr := net.ResolveUDPAddr(network, TURNServerAddr)
 				if connectErr != nil {
@@ -428,6 +435,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				RelAddr = conn.LocalAddr().(*net.UDPAddr).IP.String()
 				RelPort = conn.LocalAddr().(*net.UDPAddr).Port
 				locConn = &fakePacketConn{conn}
+			//客户端与TURN服务器采用TCP+TLS发送消息
 			case url.Proto == ProtoTypeTCP && url.Scheme == SchemeTypeTURNS:
 				conn, connectErr := tls.Dial(NetworkTypeTCP4.String(), TURNServerAddr, &tls.Config{
 					InsecureSkipVerify: a.insecureSkipVerify, //nolint:gosec
@@ -443,7 +451,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				a.log.Warnf("Unable to handle URL in gatherCandidatesRelay %v\n", url)
 				return
 			}
-			//创建turn客户端
+			//创建turn客户端，采用user+passwd认证方式
 			client, err := turn.NewClient(&turn.ClientConfig{
 				TURNServerAddr: TURNServerAddr,
 				Conn:           locConn,
@@ -462,7 +470,8 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				closeConnAndLog(locConn, a.log, fmt.Sprintf("Failed to listen on turn.Client %s %s\n", TURNServerAddr, err))
 				return
 			}
-
+			//客户端请求STUN服务器创建Allocate，服务器返回可用的Allocate
+			//一旦分配了中继服务器传输地址，客户端必须进行保活。为此，客户端定期向服务器发送Refresh请求
 			relayConn, err := client.Allocate()
 			if err != nil {
 				client.Close()
@@ -494,6 +503,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				return
 			}
 			//turn relay模式下，获取的是turn的candidate
+			//客户端将消息发送给STUN服务器，STUN服务器将消息中继到对端
 			if err := a.addCandidate(candidate, relayConn); err != nil {
 				if closeErr := candidate.close(); closeErr != nil {
 					a.log.Warnf("Failed to close candidate: %v", closeErr)

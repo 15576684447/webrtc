@@ -69,14 +69,20 @@ func (s *controllingSelector) isNominatable(c Candidate) bool {
 	return false
 }
 
+//case优先级逐渐降低，说明如下逻辑问题:(非常重要!!!!!!!!)
+//有了可以通信的selectPair，就不会再继续提名，除非该selectPair失效，需要重提名
+//有了正在提名的Pair，就不会继续ping checklist中的其他pair，除非还没正在提名的Pair
+//以上两者都没有，才会持续ping checklist中的所有pair，并从中选择一个优先级最高的连接，进行提名
 func (s *controllingSelector) ContactCandidates() {
 	switch {
+	//如果已经有selectPair(最终用于通信的)，则进行心跳保活;如果没有selectPair才会运行之后的case
 	case s.agent.getSelectedPair() != nil:
 		//对selectPair进行心跳保活
 		if s.agent.validateSelectedPair() {
 			s.log.Trace("checking keepalive")
 			s.agent.checkKeepalive()
 		}
+	//如果上一步没有selectPair，但是有待提名的pair，则进行提名操作；没有提名操作才会运行之后的case
 	case s.nominatedPair != nil:
 		//在nominatePair上持续的发送Binding request，直至达到上限或者一致有效
 		if s.nominationRequestCount > s.agent.maxBindingRequests {
@@ -88,6 +94,7 @@ func (s *controllingSelector) ContactCandidates() {
 		//普通提名方式会做两次连通性检查，在第一次做连通性检查时不会带上USE-CANDIDATE属性，而是在生成的validlist里选择pair再进行一次连通性检查，这时会带上USE-CANDIDATE属性，并且置位nominated flag。
 		//进取型方式则是每次发送连通性检查时都会带上USE-CANDIDATE属性，并且置位nominated flag，不会再去做第二次连通性检查。
 		s.nominatePair(s.nominatedPair)
+	//如果没有selectPair，也没待提名的Pair，则从checklist中选择一个优先级最高的进行提名操作；与此同时ping checklist中所有pair
 	default:
 		//对checklist进行连通性，此处会对checklist进行优先级排序，选择优先级最高的进行提名
 		p := s.agent.getBestValidCandidatePair()
@@ -167,7 +174,7 @@ func (s *controllingSelector) HandleBindingRequest(m *stun.Message, local, remot
 
 //controlling处理controled BindingSuccessResponse
 /*
-	何时会收到controled端Response
+	何时会收到controled端Response(主动发送request后返回response)
 	当controlling端在某Pair上发送发送BindingRequest时，controled会回复一个BindingSuccessResponse
 	controlling端收到BindingSuccessResponse后，该pair状态变为CandidatePairStateSucceeded
 	如果Response对应的Request请求是提名操作，即Binding中带UseCandidate标记

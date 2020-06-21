@@ -880,9 +880,10 @@ func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 		//start函数为该Candidate启动了专属recvLoop，专门用于处理接收该Candidate的消息(handleInboundCandidateMsg)
 		//根据收到的消息，判断当前Binding结果是否成功，提名是否成功
 		c.start(a, candidateConn)
-
+		//获取同类型的local candidate，检查是否已经包含了该candidate
+		//如果没包含，添加该candidate到同类集合
 		set := a.localCandidates[c.NetworkType()]
-		for _, candidate := range set {x
+		for _, candidate := range set {
 			if candidate.Equal(c) {
 				if err := c.close(); err != nil {
 					a.log.Warnf("Failed to close duplicate candidate: %v", err)
@@ -893,13 +894,13 @@ func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 
 		set = append(set, c)
 		a.localCandidates[c.NetworkType()] = set
-
+		//获取同类型的remote candidate，并依次和该candidate组成pair加入到checklist，等待连通性测试
 		if remoteCandidates, ok := a.remoteCandidates[c.NetworkType()]; ok {
 			for _, remoteCandidate := range remoteCandidates {
 				a.addPair(c, remoteCandidate)
 			}
 		}
-
+		//立马开始连通性测试
 		a.requestConnectivityCheck()
 
 		a.chanCandidate <- c
@@ -1070,7 +1071,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 	if m == nil || local == nil {
 		return
 	}
-
+	//检查Method和Class，如果不是指定Method和Class，则为错误STUN消息
 	if m.Type.Method != stun.MethodBinding ||
 		!(m.Type.Class == stun.ClassSuccessResponse ||
 			m.Type.Class == stun.ClassRequest ||
@@ -1078,8 +1079,11 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		a.log.Tracef("unhandled STUN from %s to %s class(%s) method(%s)", remote, local, m.Type.Class, m.Type.Method)
 		return
 	}
-
+	//总体意思就是忽略与自身类型一致的数据包
 	if a.isControlling {
+		//如果是Controlling模式，忽略Controlling类型数据包，主要是以下两种:
+		//1、忽略Controlling类型数据包(Controlling角色只接收Controlled数据包)
+		//2、忽略包含UseCandidate属性的(只有Controlling模式才会携带UseCandidate属性)
 		if m.Contains(stun.AttrICEControlling) {
 			a.log.Debug("inbound isControlling && a.isControlling == true")
 			return
@@ -1088,6 +1092,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 			return
 		}
 	} else {
+		//如果是Controlled模式，忽略Controlled类型数据包
 		if m.Contains(stun.AttrICEControlled) {
 			a.log.Debug("inbound isControlled && a.isControlling == false")
 			return
@@ -1117,7 +1122,8 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 			a.log.Warnf("discard message from (%s), %v", remote, err)
 			return
 		}
-
+		//如果收到的remoteCandidate不在已有范围内，说明收到了新的remoteCandidate
+		//该remoteCandidate类型为PeerReflexive!!!
 		if remoteCandidate == nil {
 			ip, port, networkType, ok := parseAddr(remote)
 			if !ok {

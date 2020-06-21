@@ -122,6 +122,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	//这里会进行连通性测试
 	//如果是ICERoleControlling方，主动发起连接
 	//如果是ICERoleControlled方，接收对方连接请求
+	//重点函数入口!!!
 	switch *role {
 	case ICERoleControlling:
 		iceConn, err = agent.Dial(context.TODO(),

@@ -119,7 +119,7 @@ func (g *ICEGatherer) createAgent() error {
 	for _, typ := range requestedNetworkTypes {
 		config.NetworkTypes = append(config.NetworkTypes, ice.NetworkType(typ))
 	}
-	//代理用于搜集candidate
+	//代理用于搜集candidate!!!
 	agent, err := ice.NewAgent(config)
 	if err != nil {
 		return err

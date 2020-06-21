@@ -883,7 +883,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	// Start the networking in a new routine since it will block until
 	// the connection is actually established.
 	pc.ops.Enqueue(func() {
-		//进行连通性测试，需要重点阅读解析
+		//进行连通性测试，需要重点阅读解析!!!
 		pc.startTransports(iceRole, dtlsRoleFromRemoteSDP(desc.parsed), remoteUfrag, remotePwd, fingerprint, fingerprintHash)
 		if weOffer {
 			pc.startRTP(false, &desc)
