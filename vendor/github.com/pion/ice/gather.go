@@ -112,18 +112,67 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 		for _, t := range a.candidateTypes {
 			switch t {
 			case CandidateTypeHost:
+				// MulticastDNSMode enum
+				//参考文档 https://tools.ietf.org/html/draft-ietf-rtcweb-mdns-ice-candidates-04
+				// WebRTC收集ICE candidate作为创建peerConnection流程的一部分
+				// 为最大化概率建立p2p连接，客户端私有IP地址也作为candidate。但是，这样涉及到私有地址的隐私问题。
+				// 本文介绍了一种与其他客户端共享本地私有IP地址，同时保留客户端隐私的方法。
+				// 这是通过动态生成多播DNS（mDNS）名称来隐藏真实私有IP地址来实现的。
+				/*
+				   发送端搜集candidate实现过程
+				   1.检查此IP地址是否可以安全公开。如果可以，则无需使用mDNS方法。否则进行下一步。
+				   2.检查ICE agent是否已经生成并注册，并按照步骤3的方法存储此IP地址的mDNS主机名。如果之前有存储，直接跳到步骤6。
+				   3.生成唯一的mDNS主机名。唯一的名称必须包含[ RFC4122 ]中定义的版本4的UUID，并添加后缀“.local”。
+				   4.按照[ RFC6762 ]中的定义注册candidate的mDNS主机名。ICE agent应发送主机名的mDNS通道，
+				   	但是由于主机名是唯一的，因此ICE agent应该跳过对主机名的探测。
+				   5.将mDNS主机名及其对应的IP地址存储在ICE agent中以备将来复用。
+				   6.使用mDNS替换ICE candidate中的私有IP地址，并提供给Web应用程序。
+
+				   接收端收到remote candidate实现过程
+				   1.如果remote ICE candidate的连接地址字段值不以“ .local”结尾或如果值包含多个“.”，则按照[ RFC8445 ]中的定义的方法处理dandidate。
+				   2.否则，使用mDNS解析candidate。ICE agent应该使用单播响应mDNS查询；这样可以最大程度地减少多播流量。
+				   3.如果解析出IP地址，则替换该mDNS域名对应的主机名，然后继续按照[ RFC8445 ]中定义的方法处理candidate。
+				   4.否则，忽略该candidate。
+				*/
 				a.gatherCandidatesLocal(a.networkTypes)
 			case CandidateTypeServerReflexive:
 				//通过指定STUN服务器地址来获取外部IP
 				//ICE利用STUN（RFC5389） Binding Request和Response，来获取公网映射地址和进行连通性检查。
+				/*
+				在Binding request/response事务中，Binding请求从STUN客户端发送到STUN服务器。
+				当Binding请求到达STUN服务器时，它可能已经通过STUN客户端和STUN服务器之间的一个或多个nat。
+				当Binding请求消息通过NAT时，NAT将修改包的源传输地址（即源IP地址和源端口）。
+				因此，服务器收到请求的src addr将是最靠近服务器的NAT公网IP地址和端口，
+				该行为被称为传输地址反射(reflexive transport address)。
+				STUN服务器将src addr复制到STUN Binding response中的XOR-MAPPED-address属性中，
+				并将Binding respons返回给STUN客户端。当包通过NAT返回时，NAT将修改IP报头中的dest addr，
+				但STUN body中的XOR-MAPPED-address属性将保持不变。如此客户端就可以获取到自身网络的外网NAT映射结果了。
+				*/
 				a.gatherCandidatesSrflx(a.urls, a.networkTypes)
 				//如果指定IPMapper
 				if a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeServerReflexive {
 					a.gatherCandidatesSrflxMapped(a.networkTypes)
 				}
 			case CandidateTypeRelay:
-				//ICE使用TURN（RFC 5766）协议作为STUN的辅助，在点对点穿越失败的情况下，借助于TURN服务的转发功能，来实现互通。
-				//TURN消息都遵循 STUN 的消息格式，除了ChannelData消息。
+				/*
+				位于NAT后面的主机可能希望与其他位于NAT后面的主机完成数据包交换，此时NAT打洞往往会失败。
+				在这种情况下，主机必须使用通信中继服务节点(relay)，这种中继通常位于公网，为两台位于NAT之后的主机中继数据包。
+				TURN（Traversal Using Relays around NAT）协议允许主机控制中继服务器的行为，使中继服务器与其对端完成数据包的交换。
+				客户端通过获取服务器上的IP地址和端口（称为中继传输地址）来完成此操作。
+				TURN与其他一些中继控制协议的不同之处在于，它允许客户端使用一个中继地址与多个对端通信。
+				虽然TURN允许使用UDP、TCP或TLS（Transport Layer Security）中的任何一个在客户端和服务器之间传送TURN消息，
+				但是TURN在服务器和对端之间总是采用UDP进行数据传输。
+				如果客户端和服务器之间使用TCP或TLS，则服务器会将其转换为UDP传输，将数据中继到对端。
+				*/
+				//使用Relay模式时，发送给对端的candidate地址应该为relay的ip:port，而不是本端的ip:port
+				//实际传输时，本端将数据发送到relay服务器，并告知relay服务器将数据中继到对端
+				/*
+				具体操作为客户端向relay服务器请求分配Allocation，如果分配成功，relay服务器会返回一个成功分配的Allocation
+				为保持Allocation不失效，客户端需要定时发送Refresh保活
+				客户端到relay服务器有两种数据发送机制：第一种机制使用Send and Data方法，第二种方法使用channels
+				Send and Data机制：客户端发送给relay服务端的数据中包含（a）一个XOR-PEER-ADDRESS属性，该属性指定对端的传输地址(NAT映射地址)，以及（b）一个包含数据的data属性
+				channels机制：使用ChannelData的备用数据包格式。该格式有一个4字节的头，其中包含一个称为channel number的数字。每个通道号都绑定到特定的对端，因此用作对端主机传输地址的简写
+				*/
 				if err := a.gatherCandidatesRelay(a.urls); err != nil {
 					a.log.Errorf("Failed to gather relay candidates: %v\n", err)
 				}
