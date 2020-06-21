@@ -782,7 +782,8 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if pc.isClosed.get() {
 		return &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
 	}
-
+	//这里的意思应该是，如果已有RemoteDescription，则说明之前就调用过该函数，此时只需要重协商，而不需要重新建立ICE
+	//如果没有RemoteDescription，则说明第一次调用，需要从头开始搜集candidate，探测candidate pair等
 	haveRemoteDescription := pc.currentRemoteDescription != nil
 
 	desc.parsed = &sdp.SessionDescription{}
@@ -1750,7 +1751,8 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 
 	pc.startRTPReceivers(trackDetails, currentTransceivers)
 	pc.startRTPSenders(currentTransceivers)
-
+	//datachannel在第一次startRTP后就建立完毕(isRenegotiation=false作为第一次调用startRTP的标志)
+	//之后的调用主要是重协商操作，所以之后的isRenegotiation=true
 	if !isRenegotiation {
 		pc.drainSRTP()
 		//m=application 使用datachannel传输
