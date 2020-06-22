@@ -880,7 +880,7 @@ func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 		//start函数为该Candidate启动了专属recvLoop，专门用于处理接收该Candidate的消息(handleInboundCandidateMsg)
 		//根据收到的消息，判断当前Binding结果是否成功，提名是否成功
 		c.start(a, candidateConn)
-		//获取同类型的local candidate，检查是否已经包含了该candidate
+		//获取同网络类型的local candidate，检查是否已经包含了该candidate
 		//如果没包含，添加该candidate到同类集合
 		set := a.localCandidates[c.NetworkType()]
 		for _, candidate := range set {
@@ -894,7 +894,7 @@ func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 
 		set = append(set, c)
 		a.localCandidates[c.NetworkType()] = set
-		//获取同类型的remote candidate，并依次和该candidate组成pair加入到checklist，等待连通性测试
+		//获取同网络类型的remote candidate，并依次和该candidate组成pair加入到checklist，等待连通性测试
 		if remoteCandidates, ok := a.remoteCandidates[c.NetworkType()]; ok {
 			for _, remoteCandidate := range remoteCandidates {
 				a.addPair(c, remoteCandidate)

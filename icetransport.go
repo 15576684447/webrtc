@@ -69,6 +69,18 @@ func NewICETransport(gatherer *ICEGatherer, loggerFactory logging.LoggerFactory)
 }
 
 // Start incoming connectivity checks based on its configured role.
+/*
+ICETransport主要通过代理完成其工作，主要工作包括以下几点:
+1、搜集Local candidate，并与remote candidate组成pair，加入到checklist中
+2、为checklist中的每个pair对应的local candidate启动一个recv监听，监听该连接上的stun ping
+3、之后立马启动连通性测试，在每个pair上发送ping，测试对方是否回复
+4、如果对方回复，则证明该连接是成功的，进而开始提名操作，携带UseCandidate属性
+5、如果对方成功回复提名，则提名成功，将该pair加入到selectPair中
+6、对于selectPair，需要定时保活，如果保活失败，则重复操作stun ping -> 提名 -> selectPair
+7、ICE连接时，一方为controlling，另一方为controlled，controlling为主动发起方
+8、controlling端调用agent.Dial主动发起，controlled端调用agent.Accept被动接收
+9、两者最后都调用ContactCandidates函数，只不过实现不同
+ */
 func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *ICERole) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
