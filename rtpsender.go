@@ -90,12 +90,12 @@ func (r *RTPSender) Send(parameters RTPSendParameters) error {
 	if r.hasSent() {
 		return fmt.Errorf("Send has already been called")
 	}
-
+	//获取rtcp session
 	srtcpSession, err := r.transport.getSRTCPSession()
 	if err != nil {
 		return err
 	}
-
+	//获取对应stream
 	r.rtcpReadStream, err = srtcpSession.OpenReadStream(parameters.Encodings.SSRC)
 	if err != nil {
 		return err

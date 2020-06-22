@@ -115,12 +115,14 @@ func (s *SessionSRTCP) write(buf []byte) (int, error) {
 	}
 
 	s.session.localContextMutex.Lock()
+	//使用localContext加密数据
 	encrypted, err := s.localContext.EncryptRTCP(nil, buf, nil)
 	s.session.localContextMutex.Unlock()
 
 	if err != nil {
 		return 0, err
 	}
+	//发送加密的数据
 	return s.session.nextConn.Write(encrypted)
 }
 
@@ -143,16 +145,17 @@ func destinationSSRC(pkts []rtcp.Packet) []uint32 {
 }
 
 func (s *SessionSRTCP) decrypt(buf []byte) error {
+	//使用remoteContext解密rtcp数据包
 	decrypted, err := s.remoteContext.DecryptRTCP(buf, buf, nil)
 	if err != nil {
 		return err
 	}
-
+	//将解密后的数据Unmarshal为rtcp pkt格式
 	pkt, err := rtcp.Unmarshal(decrypted)
 	if err != nil {
 		return err
 	}
-
+	//遍历rtcp pkt包中包含的ssrc，找到对应的rtcp stream，将解密后的数据写入到对应rtcp stream对象中供应用层使用
 	for _, ssrc := range destinationSSRC(pkt) {
 		r, isNew := s.session.getOrCreateReadStream(ssrc, s, newReadStreamSRTCP)
 		if r == nil {

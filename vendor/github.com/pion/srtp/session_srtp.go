@@ -58,7 +58,9 @@ func NewSessionSRTP(conn net.Conn, config *Config) (*SessionSRTP, error) {
 		},
 	}
 	s.writeStream = &WriteStreamSRTP{s}
-
+	//开始session，循环接收数据、解密数据并写到ReadStreamSRTP的buffer中
+	//注: ReadStreamSRTP是session上层的一个stream逻辑，底层连接负责接收数据，
+	//经过解密后成为可读性的数据，之后才写到上层的ReadStreamSRTP的buffer中，初始申请大小为1M
 	err := s.session.start(
 		config.Keys.LocalMasterKey, config.Keys.LocalMasterSalt,
 		config.Keys.RemoteMasterKey, config.Keys.RemoteMasterSalt,
@@ -125,22 +127,24 @@ func (s *SessionSRTP) writeRTP(header *rtp.Header, payload []byte) (int, error) 
 	}
 
 	s.session.localContextMutex.Lock()
+	//使用localContext加密数据
 	encrypted, err := s.localContext.encryptRTP(nil, header, payload)
 	s.session.localContextMutex.Unlock()
 
 	if err != nil {
 		return 0, err
 	}
-
+	//将加密后的数据发送
 	return s.session.nextConn.Write(encrypted)
 }
 
 func (s *SessionSRTP) decrypt(buf []byte) error {
 	h := &rtp.Header{}
+	//将数据Unmarshal到RTP数据帧
 	if err := h.Unmarshal(buf); err != nil {
 		return err
 	}
-
+	//获取上层对应ssrc的Stream对象
 	r, isNew := s.session.getOrCreateReadStream(h.SSRC, s, newReadStreamSRTP)
 	if r == nil {
 		return nil // Session has been closed
@@ -152,12 +156,12 @@ func (s *SessionSRTP) decrypt(buf []byte) error {
 	if !ok {
 		return fmt.Errorf("failed to get/create ReadStreamSRTP")
 	}
-
+	//使用remoteContext解密收到的数据
 	decrypted, err := s.remoteContext.decryptRTP(buf, buf, h)
 	if err != nil {
 		return err
 	}
-
+	//将解密后的数据回写到Stream对象
 	_, err = readStream.write(decrypted)
 	if err != nil {
 		return err

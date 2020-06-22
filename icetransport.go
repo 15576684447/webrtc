@@ -155,7 +155,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	if err != nil {
 		return err
 	}
-
+	//最终可用的conn
 	t.conn = iceConn
 
 	config := mux.Config{
@@ -163,6 +163,8 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 		BufferSize:    receiveMTU,
 		LoggerFactory: t.loggerFactory,
 	}
+	//mux作为最终底层传输对象
+	//TODO: Multiplexing为多路复用器，RTP/RTCP/DTLS/STUN/TURN/ZRTP都将复用同一个sockct连接
 	t.mux = mux.NewMux(config)
 
 	return nil
@@ -281,6 +283,7 @@ func (t *ICETransport) State() ICETransportState {
 }
 
 // NewEndpoint registers a new endpoint on the underlying mux.
+//在底层mux之上注册一个新的Endpoint
 func (t *ICETransport) NewEndpoint(f mux.MatchFunc) *mux.Endpoint {
 	t.lock.Lock()
 	defer t.lock.Unlock()

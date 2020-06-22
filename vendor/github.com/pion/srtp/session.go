@@ -104,11 +104,12 @@ func (s *session) close() error {
 
 func (s *session) start(localMasterKey, localMasterSalt, remoteMasterKey, remoteMasterSalt []byte, profile ProtectionProfile, child streamSession) error {
 	var err error
+	//localContext用于发送数据时加密数据
 	s.localContext, err = CreateContext(localMasterKey, localMasterSalt, profile, s.localOptions...)
 	if err != nil {
 		return err
 	}
-
+	//remoteContext用于接收数据时解密数据
 	s.remoteContext, err = CreateContext(remoteMasterKey, remoteMasterSalt, profile, s.remoteOptions...)
 	if err != nil {
 		return err
@@ -127,6 +128,8 @@ func (s *session) start(localMasterKey, localMasterSalt, remoteMasterKey, remote
 		b := make([]byte, 8192)
 		for {
 			var i int
+			//TODO!!! 这里的conn其实是传入的Endpoint，其有Read/Write方法，Endpoint底层封装的多路复用器
+			//底层逻辑服务接收裸数据，此时的数据是经过加密的
 			i, err = s.nextConn.Read(b)
 			if err != nil {
 				if err != io.EOF {
@@ -134,7 +137,7 @@ func (s *session) start(localMasterKey, localMasterSalt, remoteMasterKey, remote
 				}
 				return
 			}
-
+			//解密数据并回写到上层ReadStreamSRTP的buffer中
 			if err = child.decrypt(b[:i]); err != nil {
 				s.log.Infof("%v \n", err)
 			}

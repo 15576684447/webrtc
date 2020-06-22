@@ -195,6 +195,7 @@ func NewTrack(payloadType uint8, ssrc uint32, id, label string, codec *RTPCodec)
 // determinePayloadType blocks and reads a single packet to determine the PayloadType for this Track
 // this is useful if we are dealing with a remote track and we can't announce it to the user until we know the payloadType
 func (t *Track) determinePayloadType() error {
+	//从rtpReadStream buffer中读取数据
 	r, err := t.ReadRTP()
 	if err != nil {
 		return err

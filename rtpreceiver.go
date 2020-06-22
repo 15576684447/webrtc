@@ -12,6 +12,8 @@ import (
 )
 
 // RTPReceiver allows an application to inspect the receipt of a Track
+//transport对象中存放的是传输相关的成员，如rtp/rtcp session，conn对象等
+//rtpReadStream/rtcpReadStream则是对饮session的流对象，存放最终解密后的数据
 type RTPReceiver struct {
 	kind      RTPCodecType
 	transport *DTLSTransport
@@ -74,9 +76,10 @@ func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error {
 		ssrc:     parameters.Encodings.SSRC,
 		receiver: r,
 	}
-	//获取RTPReceiver的SRTPSession/SRTCPSession/rtpReadStream/rtcpReadStream
-	//一个Session包括一个WriteStream和若干个ReadStreams
-	//读取的数据放在ReadStream的buffer中
+	//获取RTPReceiver的SRTPSession/SRTCPSession
+	//每个session都有一个对应的stream对象
+	//session收到裸数据后，经过解密，将可读性数据写入对应的stream对象的buffer中，供应用层使用
+	//所以Receive调用后，最终数据会在RTP/RTCP Stream对象的buffer中
 	srtpSession, err := r.transport.getSRTPSession()
 	if err != nil {
 		return err

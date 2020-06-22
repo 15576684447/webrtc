@@ -895,6 +895,9 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 
 func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPReceiver) {
 	//获取RTPReceiver的rtpReadStream/rtcpReadStream
+	//最终只需要读取rtpReadStream/rtcpReadStream的buffer即可
+	//TODO:疑问???: ICE探测可用的selectPair如何与rtp/rtcp的conn联系
+	//TODO:Sender是在何时使用的
 	err := receiver.Receive(RTPReceiveParameters{
 		Encodings: RTPDecodingParameters{
 			RTPCodingParameters{SSRC: incoming.ssrc},
@@ -913,7 +916,7 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 	receiver.Track().mu.Unlock()
 
 	go func() {
-		//通过读取一个pkt来决定其payload类型
+		//从buffer中读取一个pkt来决定其payload类型
 		if err = receiver.Track().determinePayloadType(); err != nil {
 			pc.log.Warnf("Could not determine PayloadType for SSRC %d", receiver.Track().SSRC())
 			return
@@ -962,12 +965,17 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 			if t := localTransceivers[i]; (t.Receiver()) == nil || t.Receiver().Track() == nil || t.Receiver().Track().ssrc != ssrc {
 				continue
 			}
-			//确认incomingTracks中ssrc都没有开启transceiver，如果开启了，则从incomingTracks移除对应的ssrc
+			//如果localTransceivers已经存在了对应ssrc的Receiver，则从incomingTracks移除对应的ssrc，不再重复添加
 			delete(incomingTracks, ssrc)
 		}
 	}
 	//剩余incomingTracks中的ssrc都是未开启transceiver的
-	//查找transceiver中mid(媒体类型/audio/video)、kind(解码器类型)等与incomingTracks中ssrc一致的
+	//
+	/*
+		查找transceiver中mid(媒体类型/audio/video)、kind(解码器类型)与incomingTracks中ssrc一致的、
+		direction为RTPTransceiverDirectionRecvonly或RTPTransceiverDirectionSendrecv的、
+		Receiver不为nil但是还未收到过媒体数据的，此时先移除对应，后添加
+	*/
 	//在peerConnection中开始该ssrc的接收器(pc.startReceiver)
 	for ssrc, incoming := range incomingTracks {
 		for i := range localTransceivers {
@@ -976,14 +984,12 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 			if t.Mid() != incoming.mid {
 				continue
 			}
-
 			if (incomingTracks[ssrc].kind != t.kind) ||
 				(t.Direction() != RTPTransceiverDirectionRecvonly && t.Direction() != RTPTransceiverDirectionSendrecv) ||
 				(t.Receiver()) == nil ||
 				(t.Receiver().haveReceived()) {
 				continue
 			}
-
 			delete(incomingTracks, ssrc)
 			localTransceivers = append(localTransceivers[:i], localTransceivers[i+1:]...)
 			pc.startReceiver(incoming, t.Receiver())
@@ -1683,7 +1689,7 @@ func (pc *PeerConnection) GetStats() StatsReport {
 // Start all transports. PeerConnection now has enough state
 func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, remoteUfrag, remotePwd, fingerprint, fingerprintHash string) {
 	// Start the ice transport
-	//ice连接用到用户名和密码
+	//开始ICE建连,主要逻辑在agent中
 	err := pc.iceTransport.Start(
 		pc.iceGatherer,
 		ICEParameters{
@@ -1697,8 +1703,14 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 		pc.log.Warnf("Failed to start manager: %s", err)
 		return
 	}
-	//dtls连接用到了加密信息
 	// Start the dtls transport
+	//开始dtls交互:获取用于rtp/rtcp加密的key
+	//并获取rtp/rtcp/dtls EndPoint
+	/*
+		ice连接建立之后，发起dtls交互，得到远端和本地的srtp的key
+		分别用于解密远端到来的srtp和加密本地即将发出去的rtp数据包
+		然后通过ice连接进行传输(dtls 和 srtp都通过ice传输)
+	 */
 	err = pc.dtlsTransport.Start(DTLSParameters{
 		Role:         dtlsRole,
 		Fingerprints: []DTLSFingerprint{{Algorithm: fingerprintHash, Value: fingerprint}},
@@ -1748,7 +1760,9 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 			t.setReceiver(receiver)
 		}
 	}
-
+	//初始化Receivers并接收数据，其中会初始化RtpSession/RtcpSession，并获取对应的Stream对应
+	//session从conn对象中循环获取裸数据，经过解密后Unmarshal为rtp/rtcp packet，写入到对应的Stream对象的buffer中
+	//应用层读取数据操作其实是从buffer中获取的
 	pc.startRTPReceivers(trackDetails, currentTransceivers)
 	pc.startRTPSenders(currentTransceivers)
 	//datachannel在第一次startRTP后就建立完毕(isRenegotiation=false作为第一次调用startRTP的标志)

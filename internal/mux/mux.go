@@ -40,7 +40,8 @@ func NewMux(config Config) *Mux {
 		closedCh:   make(chan struct{}),
 		log:        config.LoggerFactory.NewLogger("mux"),
 	}
-
+	//从对端endpoints读取数据，并存放到对应endpoint的buffer中
+	//TODO: 多路复用连接上接收到的数据，根据匹配的数据包类型，写入到对应Endpoint的buffer中，并通知上层应用来读取
 	go m.readLoop()
 
 	return m
@@ -120,6 +121,8 @@ func (m *Mux) dispatch(buf []byte) error {
 
 	m.lock.Lock()
 	for e, f := range m.endpoints {
+		//f返回的是包匹配器，EndPoint在注册时，会传入一个匹配器，用于匹配不同类型数据包对应的格式格式
+		//如果buf中的数据匹配上了某个EndPoint的格式，则将数据存入对应EndPoint中
 		if f(buf) {
 			endpoint = e
 			break
@@ -135,7 +138,7 @@ func (m *Mux) dispatch(buf []byte) error {
 		}
 		return nil
 	}
-
+	//写入到Endpoint buffer，并通知上层来读取
 	_, err := endpoint.buffer.Write(buf)
 	if err != nil {
 		return err

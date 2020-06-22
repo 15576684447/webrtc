@@ -189,12 +189,14 @@ func (t *DTLSTransport) startSRTP() error {
 	if err != nil {
 		return fmt.Errorf("failed to extract sctp session keys: %v", err)
 	}
-
+	//SRTP session
+	//传入的conn为rtp的Endpoint，说明将从Endpoint的buffer中读取数据
 	srtpSession, err := srtp.NewSessionSRTP(t.srtpEndpoint, srtpConfig)
 	if err != nil {
 		return fmt.Errorf("failed to start srtp: %v", err)
 	}
-
+	//SRTCP session
+	//传入的conn为rtcp的Endpoint，说明将从Endpoint的buffer中读取数据
 	srtcpSession, err := srtp.NewSessionSRTCP(t.srtcpEndpoint, srtpConfig)
 	if err != nil {
 		return fmt.Errorf("failed to start srtp: %v", err)
@@ -274,7 +276,9 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		if t.state != DTLSTransportStateNew {
 			return DTLSRole(0), nil, &rtcerr.InvalidStateError{Err: fmt.Errorf("attempted to start DTLSTransport that is not in new state: %s", t.state)}
 		}
-
+		//添加rtp/rtcp的Endpoint
+		//在底层t.iceTransport.mux之上注册新的rtp/rtcp Endpoint，并添加对应Match function
+		//TODO:重要!!! mux(多路复用)是联系 Endpoint 和 ICE的纽带
 		t.srtpEndpoint = t.iceTransport.NewEndpoint(mux.MatchSRTP)
 		t.srtcpEndpoint = t.iceTransport.NewEndpoint(mux.MatchSRTCP)
 		t.remoteParameters = remoteParameters
@@ -296,7 +300,10 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 	}
 
 	var dtlsConn *dtls.Conn
+	//TODO: 获取 rtp/rtcp/dtls Endpoint
+	//在底层t.iceTransport.mux之上注册新的DTLS Endpoint
 	dtlsEndpoint := t.iceTransport.NewEndpoint(mux.MatchDTLS)
+	//在底层t.iceTransport.mux之上注册新的rtp/rtcp Endpoint
 	role, dtlsConfig, err := prepareTransport()
 	if err != nil {
 		return err
@@ -308,6 +315,7 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 
 	// Connect as DTLS Client/Server, function is blocking and we
 	// must not hold the DTLSTransport lock
+	//DTLS连接
 	if role == DTLSRoleClient {
 		dtlsConn, err = dtls.Client(dtlsEndpoint, dtlsConfig)
 	} else {
@@ -322,14 +330,14 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		t.onStateChange(DTLSTransportStateFailed)
 		return err
 	}
-
+	//保存dtls连接
 	t.conn = dtlsConn
 	t.onStateChange(DTLSTransportStateConnected)
 
 	if t.api.settingEngine.disableCertificateFingerprintVerification {
 		return nil
 	}
-
+	//获得对端交换的dtls certificate
 	// Check the fingerprint if a certificate was exchanged
 	remoteCerts := t.conn.ConnectionState().PeerCertificates
 	if len(remoteCerts) == 0 {
