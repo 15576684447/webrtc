@@ -140,7 +140,7 @@ func (s *SessionSRTP) writeRTP(header *rtp.Header, payload []byte) (int, error) 
 
 func (s *SessionSRTP) decrypt(buf []byte) error {
 	h := &rtp.Header{}
-	//将数据Unmarshal到RTP数据帧
+	//将数据Unmarshal到RTP数据帧,此处主要获取RTP Header，如果有拓展头，还包括扩展头
 	if err := h.Unmarshal(buf); err != nil {
 		return err
 	}

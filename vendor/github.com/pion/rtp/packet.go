@@ -99,29 +99,50 @@ func (h *Header) Unmarshal(rawPacket []byte) error {
 	 * |                             ....                              |
 	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 	 */
-
+	//V/P/X/CC共用了第1个byte
 	h.Version = rawPacket[0] >> versionShift & versionMask
 	h.Padding = (rawPacket[0] >> paddingShift & paddingMask) > 0
 	h.Extension = (rawPacket[0] >> extensionShift & extensionMask) > 0
 	h.CSRC = make([]uint32, rawPacket[0]&ccMask)
-
+	//CC，CSRC计数器，指示CSRC标识符个数
+	//由于CSRC之前的对象是固定的(V/P/X/CC~SSRC)，所以CSRC开始的位置是固定的，即12个byte
+	//每个CSRC占用4byte，由此可以推算出CSRC序列结束的位置
 	currOffset := csrcOffset + (len(h.CSRC) * csrcLength)
 	if len(rawPacket) < currOffset {
 		return fmt.Errorf("size %d < %d: %w", len(rawPacket), currOffset, errHeaderSizeInsufficient)
 	}
-
+	//M/PT共用第2个byte
 	h.Marker = (rawPacket[1] >> markerShift & markerMask) > 0
 	h.PayloadType = rawPacket[1] & ptMask
-
+	//sequence number占用第3~4个byte
 	h.SequenceNumber = binary.BigEndian.Uint16(rawPacket[seqNumOffset : seqNumOffset+seqNumLength])
+	//timestamp占用5~8个byte
 	h.Timestamp = binary.BigEndian.Uint32(rawPacket[timestampOffset : timestampOffset+timestampLength])
+	//SSRC占用第9~12个byte
 	h.SSRC = binary.BigEndian.Uint32(rawPacket[ssrcOffset : ssrcOffset+ssrcLength])
-
+	//接下来是全部的CSRC
 	for i := range h.CSRC {
 		offset := csrcOffset + (i * csrcLength)
 		h.CSRC[i] = binary.BigEndian.Uint32(rawPacket[offset:])
 	}
+	/*
+		SSRC与CSRC解释:
+		SSRC:同步信源是指产生媒体流的信源，例如麦克风、摄像机、RTP混合器等
+		CSRC:特约信源是指当混合器接收到一个或多个同步信源的RTP报文后，经过混合处理产生一个新的组合RTP报文，
+			并把混合器作为组合RTP报文的SSRC，而将原来所有的SSRC都作为CSRC传送给接收者，
+			使接收者知道组成组合报文的各个SSRC
+	 */
 
+	/*
+	 *  0                   1                   2                   3
+	 *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	 * |       Defined by Profile      |             Length            |
+	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	 * |                       Header Extension                        |
+	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+	 */
+	//Length为扩展项中 32 比特字的个数，不包括 4 个字节扩展头(因此零是有效值)
 	if h.Extension {
 		if expected := currOffset + 4; len(rawPacket) < expected {
 			return fmt.Errorf("size %d < %d: %w",
@@ -134,16 +155,39 @@ func (h *Header) Unmarshal(rawPacket []byte) error {
 		currOffset += 2
 		extensionLength := int(binary.BigEndian.Uint16(rawPacket[currOffset:])) * 4
 		currOffset += 2
-
+		//总长度check
 		if expected := currOffset + extensionLength; len(rawPacket) < expected {
 			return fmt.Errorf("size %d < %d: %w",
 				len(rawPacket), expected,
 				errHeaderSizeInsufficientForExtension,
 			)
 		}
-
+		//此时currOffset指向Header Extension开始处
+		/*
+		Header Extension数据存储方式:包含多组ID-L-data-pad，ID作为每组数据的ID号，L指定该ID号对应data长度
+		有时候一组数据不够16bit，需要用0填充(pad)
+		 */
 		switch h.ExtensionProfile {
 		// RFC 8285 RTP One Byte Header Extension
+		/*
+		  0 1 2 3 4 5 6 7
+		  +-+-+-+-+-+-+-+-+
+		  |  ID   |  len  |
+		  +-+-+-+-+-+-+-+-+
+
+		   0                   1                   2                   3
+		   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |       0xBE    |    0xDE       |           length=3            |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |  ID   | L=0   |     data      |  ID   |  L=1  |   data...
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+				...data   |    0 (pad)    |    0 (pad)    |  ID   | L=3   |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |                          data                                 |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		 */
+		//OneByte模式:ID+L占用1个byte
 		case extensionProfileOneByte:
 			end := currOffset + extensionLength
 			for currOffset < end {
@@ -166,6 +210,26 @@ func (h *Header) Unmarshal(rawPacket []byte) error {
 			}
 
 		// RFC 8285 RTP Two Byte Header Extension
+		/*
+		   0                   1
+		   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |       ID      |     length    |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+		   0                   1                   2                   3
+		   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |       0x10    |    0x00       |           length=3            |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |      ID       |     L=0       |     ID        |     L=1       |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |       data    |    0 (pad)    |       ID      |      L=4      |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		  |                          data                                 |
+		  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		 */
+		//TwoByte:ID+L占用2个byte
 		case extensionProfileTwoByte:
 			end := currOffset + extensionLength
 			for currOffset < end {
@@ -184,7 +248,16 @@ func (h *Header) Unmarshal(rawPacket []byte) error {
 				h.Extensions = append(h.Extensions, extension)
 				currOffset += len
 			}
-
+		/*
+			0                   1                   2                   3
+			0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+		   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		   |      defined by profile       |           length              |
+		   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+		   |                        header extension                       |
+		   |                             ....                              |
+		 */
+		//RFC3550: 全部header extension写到一起
 		default: // RFC3550 Extension
 			if len(rawPacket) < currOffset+extensionLength {
 				return fmt.Errorf("RTP header size insufficient for extension length; %d < %d", len(rawPacket), currOffset+extensionLength)

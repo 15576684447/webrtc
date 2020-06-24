@@ -897,6 +897,14 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 	//获取RTPReceiver的rtpReadStream/rtcpReadStream
 	//最终只需要读取rtpReadStream/rtcpReadStream的buffer即可
 	//TODO:疑问???: ICE探测可用的selectPair如何与rtp/rtcp的conn联系
+	/*
+		TODO:解答上述疑问
+		解释: selectPair上层封装了mux，即多路复用；与此同时，rtp/rtcp/dtls等构建了对应的EndPoint，底层使用了mux
+		mux收到数据包后，根据EndPoint的matchFun，匹配到对应的EndPoint，将数据存放到对应EndPoint的buffer中，并发送notify到session
+		rtc/rtcp session收到EndPoint的notify后，从EndPoint buffer中读取数据，并放到rtc/rtcp Stream对象的buffer中
+		session与stream的对应关系为: 一个rtp/rtcp session可对应多个rtp/rtcp stream
+		TODO:rtp stream与track的关系???
+	 */
 	//TODO:Sender是在何时使用的
 	err := receiver.Receive(RTPReceiveParameters{
 		Encodings: RTPDecodingParameters{

@@ -55,12 +55,12 @@ func Marshal(packets []Packet) ([]byte, error) {
 // and returns it's parsed representation, and the amount of data that was processed.
 func unmarshal(rawData []byte) (packet Packet, bytesprocessed int, err error) {
 	var h Header
-
+	//解析Rtcp Header
 	err = h.Unmarshal(rawData)
 	if err != nil {
 		return nil, 0, err
 	}
-
+	//总共需要处理的数据长度，包括4byte长度的header
 	bytesprocessed = int(h.Length+1) * 4
 	if bytesprocessed > len(rawData) {
 		return nil, 0, errPacketTooShort
