@@ -246,6 +246,7 @@ func addTransceiverSDP(d *sdp.SessionDescription, isPlanB bool, mediaEngine *Med
 		WithPropertyAttribute(sdp.AttrKeyRTCPRsize)
 
 	codecs := mediaEngine.GetCodecsByKind(t.kind)
+	//a=rtcp-fb:111 transport-cc
 	for _, codec := range codecs {
 		media.WithCodec(codec.PayloadType, codec.Name, codec.ClockRate, codec.Channels, codec.SDPFmtpLine)
 
@@ -269,6 +270,12 @@ func addTransceiverSDP(d *sdp.SessionDescription, isPlanB bool, mediaEngine *Med
 		return false, nil
 	}
 
+	/*
+	a=ssrc:3463951252 cname:sTjtznXLCNH7nbRw
+	a=ssrc:3463951252 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C ead4b4e9-b650-4ed5-86f8-6f5f5806346d
+	a=ssrc:3463951252 mslabel:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C
+	a=ssrc:3463951252 label:ead4b4e9-b650-4ed5-86f8-6f5f5806346d
+	*/
 	for _, mt := range transceivers {
 		if mt.Sender() != nil && mt.Sender().track != nil {
 			track := mt.Sender().track
@@ -297,7 +304,7 @@ type mediaSection struct {
 // populateSDP serializes a PeerConnections state into an SDP
 func populateSDP(d *sdp.SessionDescription, isPlanB bool, isICELite bool, mediaEngine *MediaEngine, connectionRole sdp.ConnectionRole, candidates []ICECandidate, iceParams ICEParameters, mediaSections []mediaSection, iceGatheringState ICEGatheringState) (*sdp.SessionDescription, error) {
 	var err error
-
+	//BUNDLE: 音视频以及数据共用一个媒体传输通道，否则，音视频、数据就会分别单独用一个udp端口来发送
 	bundleValue := "BUNDLE"
 	bundleCount := 0
 	appendBundle := func(midValue string) {
@@ -306,6 +313,8 @@ func populateSDP(d *sdp.SessionDescription, isPlanB bool, isICELite bool, mediaE
 	}
 
 	for _, m := range mediaSections {
+		//datachannel和Media不共用
+		//UnifiedPlan模式下每个transceiver只有一个track
 		if m.data && len(m.transceivers) != 0 {
 			return nil, fmt.Errorf("invalid Media Section. Media + DataChannel both enabled")
 		} else if !isPlanB && len(m.transceivers) > 1 {
@@ -344,7 +353,13 @@ func descriptionIsPlanB(desc *SessionDescription) bool {
 	if desc == nil || desc.parsed == nil {
 		return false
 	}
-
+	//如何判断SDP为PlanB类型
+	/*
+		PlanB类型SDP特性为:
+		所有音频共用一个audio标签，所有视频共用一个video标签
+		而UnifiedPlan特性为:
+		各个音视频都独享其audio/video标签
+	 */
 	detectionRegex := regexp.MustCompile(`(?i)^(audio|video|data)$`)
 	for _, media := range desc.parsed.MediaDescriptions {
 		if len(detectionRegex.FindStringSubmatch(getMidValue(media))) == 2 {

@@ -127,6 +127,7 @@ func findByMid(mid string, localTransceivers []*RTPTransceiver) (*RTPTransceiver
 // if no entry satisfies the requested type+direction return a inactive Transceiver
 func satisfyTypeAndDirection(remoteKind RTPCodecType, remoteDirection RTPTransceiverDirection, localTransceivers []*RTPTransceiver) (*RTPTransceiver, []*RTPTransceiver) {
 	// Get direction order from most preferred to least
+	//根据remote direction，估计local direction
 	getPreferredDirections := func() []RTPTransceiverDirection {
 		switch remoteDirection {
 		case RTPTransceiverDirectionSendrecv:
@@ -138,7 +139,10 @@ func satisfyTypeAndDirection(remoteKind RTPCodecType, remoteDirection RTPTransce
 		}
 		return []RTPTransceiverDirection{}
 	}
-
+	//local Transceive和remote Transceiver direction相反，type相同
+	//根据这个依据，确定local Transceive的direction和type
+	//找出type和direction相符的，如果找到，则返回对应的Transceiver和剩余的Transceivers
+	//否则返回nil和所有Transceivers
 	for _, possibleDirection := range getPreferredDirections() {
 		for i := range localTransceivers {
 			t := localTransceivers[i]

@@ -1849,6 +1849,7 @@ func (pc *PeerConnection) generateUnmatchedSDP(useIdentity bool) (*sdp.SessionDe
 // generateMatchedSDP generates a SDP and takes the remote state into account
 // this is used everytime we have a RemoteDescription
 func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched bool, connectionRole sdp.ConnectionRole) (*sdp.SessionDescription, error) {
+	//构造基本SDP框架
 	d := sdp.NewJSEPSessionDescription(useIdentity)
 	if err := addFingerprints(d, pc.configuration.Certificates[0]); err != nil {
 		return nil, err
@@ -1865,6 +1866,7 @@ func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched 
 	}
 
 	var t *RTPTransceiver
+	//获取localTransceivers，可以根据Transceivers获取track信息
 	localTransceivers := append([]*RTPTransceiver{}, pc.GetTransceivers()...)
 	detectedPlanB := descriptionIsPlanB(pc.RemoteDescription())
 	mediaSections := []mediaSection{}
@@ -1874,21 +1876,23 @@ func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched 
 		if midValue == "" {
 			return nil, fmt.Errorf("RemoteDescription contained media section without mid value")
 		}
-
+		//datachannel单独添加，因为一个回话最多只有一个datachannel
 		if media.MediaName.Media == mediaSectionApplication {
 			mediaSections = append(mediaSections, mediaSection{id: midValue, data: true})
 			continue
 		}
-
+		//根据remote媒体type和direction，获取local媒体type(audio/video)和direction
+		//local媒体类型与remote媒体类型一致，但是direction一般为相反(单向时，SendOnly或RecvOnly)或者相同(SendRecv)
 		kind := NewRTPCodecType(media.MediaName.Media)
 		direction := getPeerDirection(media)
 		if kind == 0 || direction == RTPTransceiverDirection(Unknown) {
 			continue
 		}
-
+		//定义的SDP type,而detectedPlanB是根据实际sdp检测出来的，下面会将两者进行对比，如果不相符，则返回错误
 		sdpSemantics := pc.configuration.SDPSemantics
 
 		switch {
+		//PlanB Offer
 		case sdpSemantics == SDPSemanticsPlanB || sdpSemantics == SDPSemanticsUnifiedPlanWithFallback && detectedPlanB:
 			if !detectedPlanB {
 				return nil, &rtcerr.TypeError{Err: ErrIncorrectSDPSemantics}
@@ -1896,10 +1900,13 @@ func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched 
 			// If we're responding to a plan-b offer, then we should try to fill up this
 			// media entry with all matching local transceivers
 			mediaTransceivers := []*RTPTransceiver{}
+			//如果是PlanB模式，每次遍历出一组audio或者video，需要将其全部解析完毕
 			for {
 				// keep going until we can't get any more
+				//根据remote type和direction，找出符合条件的local transceiver，每次只返回一个transceiver，直到返回nil
 				t, localTransceivers = satisfyTypeAndDirection(kind, direction, localTransceivers)
 				if t == nil {
+					//如果没找到任何合适的，则置direction为Inactive
 					if len(mediaTransceivers) == 0 {
 						t = &RTPTransceiver{kind: kind}
 						t.setDirection(RTPTransceiverDirectionInactive)
@@ -1907,6 +1914,7 @@ func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched 
 					}
 					break
 				}
+				//如果Sender不为空，则设置Negotiated=true，即已协商
 				if t.Sender() != nil {
 					t.Sender().setNegotiated()
 				}
@@ -1917,6 +1925,7 @@ func (pc *PeerConnection) generateMatchedSDP(useIdentity bool, includeUnmatched 
 			if detectedPlanB {
 				return nil, &rtcerr.TypeError{Err: ErrIncorrectSDPSemantics}
 			}
+			//如果是UnifiedPlan模式，每次遍历出单个audio或video，每次只解析一条
 			t, localTransceivers = findByMid(midValue, localTransceivers)
 			if t == nil {
 				return nil, fmt.Errorf("cannot find transceiver with mid %q", midValue)
