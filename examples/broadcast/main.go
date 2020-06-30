@@ -25,6 +25,7 @@ func main() {
 
 	// Since we are answering use PayloadTypes declared by offerer
 	mediaEngine := webrtc.MediaEngine{}
+	//根据具体sdp涉及到的audio/video，注册对应的编解码器
 	err := mediaEngine.PopulateFromSDP(offer)
 	if err != nil {
 		panic(err)
