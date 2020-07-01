@@ -95,13 +95,14 @@ func (r *RTPSender) Send(parameters RTPSendParameters) error {
 	if err != nil {
 		return err
 	}
-	//获取对应stream
+	//获取对应MediaStream
 	r.rtcpReadStream, err = srtcpSession.OpenReadStream(parameters.Encodings.SSRC)
 	if err != nil {
 		return err
 	}
 
 	r.track.mu.Lock()
+	//track发送列表，track收到数据后，会将数据发送给所有activeSenders
 	r.track.activeSenders = append(r.track.activeSenders, r)
 	r.track.mu.Unlock()
 

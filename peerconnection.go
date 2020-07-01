@@ -801,30 +801,49 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	localTransceivers := append([]*RTPTransceiver{}, pc.GetTransceivers()...)
 	detectedPlanB := descriptionIsPlanB(pc.RemoteDescription())
 
+	/*
+	TODO:RTPTransceiver意义及其与track的关系
+		1、每个RTPTransceiver对应sdp中的一个<m=...>标签
+		2、对于Plan B模式，本地要发送的多个相同媒体类型的local track（a=ssrc不同）可能会属于同一个mLine，
+			因此，RTPTransceiver包含多个RtpSender的向量 ，每个RtpSender会存储其中一个local track。
+		3、对于Unified Plan模式，RTPTransceiver的RtpSender向量实质上只会存在一个RtpSender。
+		4、RTPTransceiver还包含一个RtpReceiver，用于保存remote track。
+	*/
+	//确定是否存在对应可用的transceiver，如果不存在，则新建一个
 	if !weOffer && !detectedPlanB {
+		//每个<m=...>对应一个transceiver
 		for _, media := range pc.RemoteDescription().parsed.MediaDescriptions {
+			//获取m标签对应的媒体类型audio/video/application
 			midValue := getMidValue(media)
 			if midValue == "" {
 				return fmt.Errorf("RemoteDescription contained media section without mid value")
 			}
-
+			//application不使用transceiver
 			if media.MediaName.Media == mediaSectionApplication {
 				continue
 			}
-
+			//获取<m=...>对应的codec类型和direction
 			kind := NewRTPCodecType(media.MediaName.Media)
 			direction := getPeerDirection(media)
 			if kind == 0 || direction == RTPTransceiverDirection(Unknown) {
 				continue
 			}
 			//根据midValue匹配
+			/*
+			TODO:
+				对于每个<m=...>，对应一个transceiver，首先从已有的transceiver中查找是否有可复用的
+				可复用的条件为:
+					1、transceiver类型与<m=...>类型一致，如都为audio/video
+					2、transceiver中Sender的track为nil，即未被其他track占用
+					3、transceiver的direction未被设置为send，即如果添加发送track，就需要设置direction为可发送
+					4、transceiver状态不为stop
+			 */
 			t, localTransceivers = findByMid(midValue, localTransceivers)
 			if t == nil {
 				//进一步再根据RTPCodecType(audio/video)和传输方向匹配
 				t, localTransceivers = satisfyTypeAndDirection(kind, direction, localTransceivers)
 			}
-			//如果匹配到合适的，生成RTPReceiver和RTPTransceiver
-			//疑问???: Transceivers如何得到以及其作用
+			//如果未匹配到任何transceiver，则新建一个，此时只添加RTPReceiver，RTPSender置为nil
 			if t == nil {
 				receiver, err := pc.api.NewRTPReceiver(kind, pc.dtlsTransport)
 				if err != nil {
@@ -1020,6 +1039,14 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 }
 
 // startRTPSenders starts all outbound RTP streams
+/*
+TODO:这里有一个特别细微但是关键的细节
+	startRTPSenders -> transceiver.Sender().Send -> r.track.activeSenders = append(r.track.activeSenders, r)
+	同一个track添加到不同pc的RTPSender中，其实是指向了该track的地址，所以引用的同一个
+	所以上述的结果就是将Sender都存放到了同一个track的activeSenders
+	!!!这里实现的核心功能为: 将指向相同track的所有RTPSender放到该track的activeSenders中
+	那么该track在发送数据时，只需要遍历其下的所有activeSenders，然后逐个发送即可
+ */
 func (pc *PeerConnection) startRTPSenders(currentTransceivers []*RTPTransceiver) {
 	for _, transceiver := range currentTransceivers {
 		// TODO(sgotti) when in future we'll avoid replacing a transceiver sender just check the transceiver negotiation status
@@ -1231,31 +1258,43 @@ func (pc *PeerConnection) GetTransceivers() []*RTPTransceiver {
 }
 
 // AddTrack adds a Track to the PeerConnection
+/*
+TODO:
+	将track添加到PeerConnection的RTPTransceiver的RTPSender中
+	首先查看是否存在可以被复用RTPTransceiver
+	1、如果存在可用的RTPTransceiver，即其媒体类型与track相同，且RTPSender没有被使用，则该RTPTransceiver可以被复用
+	2、否则新建可以新的RTPTransceiver
+ */
 func (pc *PeerConnection) AddTrack(track *Track) (*RTPSender, error) {
 	if pc.isClosed.get() {
 		return nil, &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
 	}
 
 	var transceiver *RTPTransceiver
+	//找到可用的Transceiver：类型一致且Sender没有被使用
 	for _, t := range pc.GetTransceivers() {
 		if !t.stopped && t.kind == track.Kind() && t.Sender() == nil {
 			transceiver = t
 			break
 		}
 	}
+	//如果已经存在transceiver，直接复用
 	if transceiver != nil {
+		//新建一个RTPSender
 		sender, err := pc.api.NewRTPSender(track, pc.dtlsTransport)
 		if err != nil {
 			return nil, err
 		}
+		//设置该Transceiver的RTPSender
 		transceiver.setSender(sender)
 		// we still need to call setSendingTrack to ensure direction has changed
+		//设置RTPSender对应的direction属性，如果是增加track，增加send属性；如果是移除track，移除send属性
 		if err := transceiver.setSendingTrack(track); err != nil {
 			return nil, err
 		}
 		return sender, nil
 	}
-
+	//如果不存在transceiver，新加
 	transceiver, err := pc.AddTransceiverFromTrack(track)
 	if err != nil {
 		return nil, err
@@ -1312,20 +1351,22 @@ func (pc *PeerConnection) AddTransceiverFromKind(kind RTPCodecType, init ...RtpT
 		if len(codecs) == 0 {
 			return nil, fmt.Errorf("no %s codecs found", kind.String())
 		}
-
+		//指定track的ssrc、trackId以及trackLabel信息
+		//如果是Sendrecv，需要初始化一个对应的track，并增加一个Transceiver
 		track, err := pc.NewTrack(codecs[0].PayloadType, mathRand.Uint32(), util.RandSeq(trackDefaultIDLength), util.RandSeq(trackDefaultLabelLength))
 		if err != nil {
 			return nil, err
 		}
-
+		//添加一个Transceiver
 		return pc.AddTransceiverFromTrack(track, init...)
 
 	case RTPTransceiverDirectionRecvonly:
+		//如果只是Recvonly，只需要初始化Receiver即可，无需track
 		receiver, err := pc.api.NewRTPReceiver(kind, pc.dtlsTransport)
 		if err != nil {
 			return nil, err
 		}
-
+		//添加一个Transceiver
 		return pc.newRTPTransceiver(
 			receiver,
 			nil,
@@ -1732,11 +1773,33 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 
 func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDescription) {
 	currentTransceivers := append([]*RTPTransceiver{}, pc.GetTransceivers()...)
-	//根据ssrc, ssrc-group获取真实的track信息与流信息，并去除重传ssrc
+	/*
+	a=group:BUNDLE audio video data
+	a=msid-semantic: WMS h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C
+	m=audio 9 UDP/TLS/RTP/SAVPF 111 103 104 9 0 8 106 105 13 126
+	a=mid:audio
+	a=ssrc:18509423 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C 15598a91-caf9-4fff-a28f-3082310b2b7a
+	m=video 9 UDP/TLS/RTP/SAVPF 100 101 107 116 117 96 97 99 98
+	a=mid:video
+	a=ssrc:3463951252 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C ead4b4e9-b650-4ed5-86f8-6f5f5806346d
+	m=application 9 DTLS/SCTP 5000
+	a=mid:data
+	TODO: 解析track
+		对于Plan B模式，一个mLine对应若干个类型相同的track，属于一对多
+		对于Unified Plan模式，一个mLine对应一个track，属于一对一
+		每个<a=ssrc:ssrc_id msid:mediaStreamId trackId>中，指定了每个track的媒体源、所属mediaStream以及其trackId
+	*/
 	trackDetails := trackDetailsFromSDP(pc.log, remoteDesc.parsed)
 	if isRenegotiation {
-		//Transceivers作为收发器，既包含Sender，也包含Receiver，对于LocalSDP，其描述的Sender部分
-		//对于RemoteSDP，其描述的是Receiver部分，所以此处主要检查Receiver部分逻辑
+		/*
+		TODO:重协商做了啥
+			重协商主要针对remote track做了调整，remote track信息保存在RTPTransceiver的RTPReceiver中
+			1、如果当前RTPTransceiver的RTPReceiver绑定了track，则查看该track是否仍然存在(ssrc为唯一id)
+				1.1、track仍然使用中，更新该track信息，保留使用
+				1.2、track已经不再使用，停止并新建一个替换之
+			总之就是删除不再使用的RTPReceiver，保留并更新正在使用的RTPReceiver！！！
+		 */
+		//检查RTPTransceiver的RTPReceiver，确认是否仍在使用中，删除不再使用的
 		for _, t := range currentTransceivers {
 			//空的Receiver
 			if t.Receiver() == nil || t.Receiver().Track() == nil {
@@ -1745,7 +1808,7 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 
 			t.Receiver().Track().mu.Lock()
 			ssrc := t.Receiver().Track().ssrc
-			//该Receiver对应的ssrc在trackDetails中有对应存在，则将该trackDetails属性设置到对应的Receiver().Track()中
+			//该Receiver仍有对应的track存在，更新属性即可
 			if _, ok := trackDetails[ssrc]; ok {
 				incoming := trackDetails[ssrc]
 				t.Receiver().Track().id = incoming.id//track_id
@@ -1754,7 +1817,7 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 				continue
 			}
 			t.Receiver().Track().mu.Unlock()
-			//如果Receiver不空，并且也不在已知的trackDetails范围内，则先Stop，再重建一个对应的Receiver
+			//如果Receiver已经不再使用，删除并重建空的
 			if err := t.Receiver().Stop(); err != nil {
 				pc.log.Warnf("Failed to stop RtpReceiver: %s", err)
 				continue

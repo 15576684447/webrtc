@@ -171,7 +171,7 @@ func NewTrack(payloadType uint8, ssrc uint32, id, label string, codec *RTPCodec)
 	if ssrc == 0 {
 		return nil, fmt.Errorf("SSRC supplied to NewTrack() must be non-zero")
 	}
-
+	//指定track的包装器，发送数据包时使用
 	packetizer := rtp.NewPacketizer(
 		rtpOutboundMTU,
 		payloadType,

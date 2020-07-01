@@ -97,9 +97,16 @@ func main() {
 	localTrackChan := make(chan *webrtc.Track)
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
+	//该peerConnection的远端为Publish端，本地端监听远端的OnTrack事件，当远端开始一个track发送时，即触发该回调
+	//回调的内容为新建一个local track(如remote track绑定)，并将待发送的RTPSender都添加至local track的activeSenders中
+	//一旦从remote track的receiver收到数据，则将数据分发给各个Pub端，即local track的activeSenders对应的RTPSender对象
 	peerConnection.OnTrack(func(remoteTrack *webrtc.Track, receiver *webrtc.RTPReceiver) {
 		// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
 		// This can be less wasteful by processing incoming RTCP events, then we would emit a NACK/PLI when a viewer requests it
+		fmt.Printf("OnTrack Handler: track_id: %s, track_ssrc: %d, track_label: %s, \r" +
+			"eceiver_track_id: %s, receiver_track_ssrc: %d, receiver_track_label: %s\n",
+		remoteTrack.ID(), remoteTrack.SSRC(), remoteTrack.Label(), receiver.Track().ID(),
+		receiver.Track().SSRC(), receiver.Track().Label())
 		go func() {
 			ticker := time.NewTicker(rtcpPLIInterval)
 			for range ticker.C {
@@ -115,15 +122,26 @@ func main() {
 			panic(newTrackErr)
 		}
 		localTrackChan <- localTrack
-
+		fmt.Printf("OnTrack Handler -> NewLocalTrack: track_id: %s, track_ssrc: %d, track_label: %s\n",
+			localTrack.ID(), localTrack.SSRC(), localTrack.Label())
 		rtpBuf := make([]byte, 1400)
 		for {
+			//从Publisher端读取数据
 			i, readErr := remoteTrack.Read(rtpBuf)
 			if readErr != nil {
 				panic(readErr)
 			}
-
 			// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
+			//分发给Subscribers
+			/*
+			TODO:
+				这里涉及到track结构体，track结构体有一个receiver和若干个activeSenders，
+				每次将该track add到某个peerConnection，其实就是将该peerConnection的RTPSender
+				添加到该track的activeSenders的过程，最后当该track的receiver收到数据时，
+				会将其分发给所有的activeSenders。
+				而一个MediaStream包含若干个track，其主要完成track同步，如音视频track的时间戳同步等。
+
+			 */
 			if _, err = localTrack.Write(rtpBuf[:i]); err != nil && err != io.ErrClosedPipe {
 				panic(err)
 			}
@@ -155,7 +173,7 @@ func main() {
 	for {
 		fmt.Println("")
 		fmt.Println("Curl an base64 SDP to start sendonly peer connection")
-
+		//每次收到一个Subscriber的sdp，就建立一个peerConnection，并将localTrack添加到该peerConnection，即发送该Track给对端Subscriber
 		recvOnlyOffer := webrtc.SessionDescription{}
 		signal.Decode(<-sdpChan, &recvOnlyOffer)
 

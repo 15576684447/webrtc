@@ -92,12 +92,25 @@ func (t *RTPTransceiver) setDirection(d RTPTransceiverDirection) {
 	t.direction.Store(d)
 }
 
+/*
+TODO:
+	设置RTPTransceiver的direction属性：
+		如果添加的track不为nil，即使用Sender，则在direction中增加Send属性
+		如果添加的track为nil，即清除Sender，则移除direction的Send属性
+	RTPTransceiver的Sender可以被复用的前提：
+		direction没有被设置Send属性，如果被设置，说明已经有track占用了Sender
+		所以在移除其上的track时，需要同时将Send属性移除
+ */
 func (t *RTPTransceiver) setSendingTrack(track *Track) error {
 	t.Sender().track = track
 	if track == nil {
 		t.setSender(nil)
 	}
-
+	/*
+	RTPTransceiverDirectionInactive:未指定方向，如果只增加send属性，则变为RTPTransceiverDirectionSendonly
+	如果只增加receive属性，则变为RTPTransceiverDirectionRecvonly
+	如果同时增加send和receive，则变为RTPTransceiverDirectionSendrecv
+	 */
 	switch {
 	case track != nil && t.Direction() == RTPTransceiverDirectionRecvonly:
 		t.setDirection(RTPTransceiverDirectionSendrecv)
@@ -146,6 +159,7 @@ func satisfyTypeAndDirection(remoteKind RTPCodecType, remoteDirection RTPTransce
 	for _, possibleDirection := range getPreferredDirections() {
 		for i := range localTransceivers {
 			t := localTransceivers[i]
+			//之前根据Mid匹配过一次，未匹配的肯定是Mid为空的
 			if t.Mid() == "" && t.kind == remoteKind && possibleDirection == t.Direction() {
 				return t, append(localTransceivers[:i], localTransceivers[i+1:]...)
 			}
