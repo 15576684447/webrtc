@@ -13,6 +13,7 @@ func (c Configuration) getICEServers() []ICEServer {
 		for i, rawURL := range server.URLs {
 			if strings.HasPrefix(rawURL, "stun") {
 				// strip the query from "stun(s):" if present
+				//如果url携带参数，则截取参数之前的url
 				parts := strings.Split(rawURL, "?")
 				rawURL = parts[0]
 			}

@@ -279,6 +279,7 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		//添加rtp/rtcp的Endpoint
 		//在底层t.iceTransport.mux之上注册新的rtp/rtcp Endpoint，并添加对应Match function
 		//TODO:重要!!! mux(多路复用)是联系 Endpoint 和 ICE的纽带
+		//因为rtp与rtcp复用一个连接，所以为了区分rtp/rtcp包，为不同rtp/rtcp endPoint注册不同匹配函数，以匹配不同的数据包，存入不同的endPoint
 		t.srtpEndpoint = t.iceTransport.NewEndpoint(mux.MatchSRTP)
 		t.srtcpEndpoint = t.iceTransport.NewEndpoint(mux.MatchSRTCP)
 		t.remoteParameters = remoteParameters
@@ -315,7 +316,17 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 
 	// Connect as DTLS Client/Server, function is blocking and we
 	// must not hold the DTLSTransport lock
-	//DTLS连接
+	/*
+		DTLS连接，客户端和服务端交换密钥
+		1、客户端发送ClientHello
+		2、服务端回复HelloVerifyRequest
+		3、客户端再次发送ClientHello
+		4、服务端返回证书公钥
+		5、客户端验证证书合法性，如果合法，则使用服务端的公钥加密密钥后发送给服务端
+		6、服务端利用认证私钥解密，获得密钥
+		7、客户端与服务端使用该密钥进行数据加密传输
+
+	 */
 	if role == DTLSRoleClient {
 		dtlsConn, err = dtls.Client(dtlsEndpoint, dtlsConfig)
 	} else {

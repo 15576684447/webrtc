@@ -112,6 +112,7 @@ func (s *controllingSelector) ContactCandidates() {
 	}
 }
 
+//提名pair candidate，BindingRequest带上UseCandidate属性
 func (s *controllingSelector) nominatePair(pair *candidatePair) {
 	// The controlling agent MUST include the USE-CANDIDATE attribute in
 	// order to nominate a candidate pair (Section 8.1.1).  The controlled
@@ -250,6 +251,7 @@ func (s *controlledSelector) Start() {
 	s.startTime = time.Now()
 }
 
+//被控端只做一件事儿: 如果有selectPair，则心跳保活；如果没，ping所有pair
 func (s *controlledSelector) ContactCandidates() {
 	if s.agent.getSelectedPair() != nil {
 		if s.agent.validateSelectedPair() {

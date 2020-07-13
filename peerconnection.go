@@ -209,7 +209,7 @@ func (pc *PeerConnection) initConfiguration(configuration Configuration) error {
 	if configuration.SDPSemantics != SDPSemantics(Unknown) {
 		pc.configuration.SDPSemantics = configuration.SDPSemantics
 	}
-
+	//获取正确的url
 	sanitizedICEServers := configuration.getICEServers()
 	if len(sanitizedICEServers) > 0 {
 		for _, server := range sanitizedICEServers {

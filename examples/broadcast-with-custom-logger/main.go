@@ -46,6 +46,9 @@ func (c customLogger) Errorf(format string, args ...interface{}) {
 type customLoggerFactory struct {
 }
 
+//实现了Logger接口，从而自定义Logger形式
+//customLoggerFactory实现了LoggerFactory接口
+//customLogger实现了LeveledLogger接口
 func (c customLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
 	fmt.Printf("Creating logger for %s \n", subsystem)
 	return customLogger{}
@@ -108,6 +111,7 @@ func main() {
 		remoteTrack.ID(), remoteTrack.SSRC(), remoteTrack.Label(), receiver.Track().ID(),
 		receiver.Track().SSRC(), receiver.Track().Label())
 		go func() {
+			//每3s请求一次关键帧
 			ticker := time.NewTicker(rtcpPLIInterval)
 			for range ticker.C {
 				if rtcpSendErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: remoteTrack.SSRC()}}); rtcpSendErr != nil {
