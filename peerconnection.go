@@ -915,16 +915,22 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPReceiver) {
 	//获取RTPReceiver的rtpReadStream/rtcpReadStream
 	//最终只需要读取rtpReadStream/rtcpReadStream的buffer即可
-	//TODO:疑问???: ICE探测可用的selectPair如何与rtp/rtcp的conn联系
 	/*
-		TODO:解答上述疑问
-		解释: selectPair上层封装了mux，即多路复用；与此同时，rtp/rtcp/dtls等构建了对应的EndPoint，底层使用了mux
-		mux收到数据包后，根据EndPoint的matchFun，匹配到对应的EndPoint，将数据存放到对应EndPoint的buffer中，并发送notify到session
-		rtc/rtcp session收到EndPoint的notify后，从EndPoint buffer中读取数据，并放到rtc/rtcp Stream对象的buffer中
-		session与stream的对应关系为: 一个rtp/rtcp session可对应多个rtp/rtcp stream
-		TODO:rtp stream与track的关系???
+		TODO:疑问???: ICE探测可用的selectPair如何与rtp/rtcp的conn联系
+			解释: selectPair上层封装了mux，即多路复用；与此同时，rtp/rtcp/dtls等构建了对应的EndPoint，底层使用了mux
+			mux收到数据包后，根据EndPoint的matchFun，匹配到对应的EndPoint，将数据存放到对应EndPoint的buffer中，并发送notify到session
+			rtc/rtcp session收到EndPoint的notify后，从EndPoint buffer中读取数据，并存储到对应ssrc的rtc/rtcp Stream对象的buffer中
+			而一个rtp/rtcp Stream对应一个ssrc，而ssrc与track一一对应
+			所以读取track数据就等同于从对应ssrc的rtp Stream的buffer中读取数据，session将数据写入对应ssrc的stream后就会通知对应ssrc的track来读取
+			session与stream的对应关系为: 一个rtp/rtcp session可对应多个rtp/rtcp stream(如果存在多个ssrc)
+			session只是一个中间产物，stream才是最终操作的句柄对象，session将数据写入stream后会通过chan通知对应track来读取数据
 	 */
-	//TODO:Sender是在何时使用的
+	/*
+		TODO:Sender是在何时使用的
+			要在某个pc上发送某个track，只要将该track添加到该pc即可
+			在pc上添加track的过程，就是将pc上对应Transceiver的RTPSender添加到该track的activeSenders的过程
+			最后当track收到数据后，就会遍历其activeSenders数组，并依次发送track数据到各个RTPSender
+	 */
 	err := receiver.Receive(RTPReceiveParameters{
 		Encodings: RTPDecodingParameters{
 			RTPCodingParameters{SSRC: incoming.ssrc},
@@ -987,6 +993,7 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 	}
 
 	// Ensure we haven't already started a transceiver for this ssrc
+	//从incomingTracks中移除已经添加到localTransceivers的tracks，剩下还未添加到localTransceivers的tracks将在之后添加
 	for ssrc := range incomingTracks {
 		for i := range localTransceivers {
 			if t := localTransceivers[i]; (t.Receiver()) == nil || t.Receiver().Track() == nil || t.Receiver().Track().ssrc != ssrc {
@@ -999,9 +1006,9 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks map[uint32]trackDetai
 	//剩余incomingTracks中的ssrc都是未开启transceiver的
 	//
 	/*
-		查找transceiver中mid(媒体类型/audio/video)、kind(解码器类型)与incomingTracks中ssrc一致的、
-		direction为RTPTransceiverDirectionRecvonly或RTPTransceiverDirectionSendrecv的、
-		Receiver不为nil但是还未收到过媒体数据的，此时先移除对应，后添加
+		(type一致)查找transceiver中mid(媒体类型/audio/video)、kind(解码器类型)与incomingTracks中ssrc一致的、
+		(可用于接收的Transceivers)direction为RTPTransceiverDirectionRecvonly或RTPTransceiverDirectionSendrecv的、
+		(可用并且还没被其他track占用)Receiver不为nil并且还未收到过媒体数据的(即没有用于其他track的Receiver)
 	*/
 	//在peerConnection中开始该ssrc的接收器(pc.startReceiver)
 	for ssrc, incoming := range incomingTracks {
@@ -1823,7 +1830,7 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 				pc.log.Warnf("Failed to stop RtpReceiver: %s", err)
 				continue
 			}
-			//重建Receiver
+			//重建Receiver，此时Receiver的track为空，即不与任何track绑定
 			receiver, err := pc.api.NewRTPReceiver(t.Receiver().kind, pc.dtlsTransport)
 			if err != nil {
 				pc.log.Warnf("Failed to create new RtpReceiver: %s", err)
