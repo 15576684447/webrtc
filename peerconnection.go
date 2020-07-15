@@ -1756,9 +1756,10 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 	//开始dtls交互:获取用于rtp/rtcp加密的key
 	//并获取rtp/rtcp/dtls EndPoint
 	/*
-		ice连接建立之后，发起dtls交互，得到远端和本地的srtp的key
-		分别用于解密远端到来的srtp和加密本地即将发出去的rtp数据包
-		然后通过ice连接进行传输(dtls 和 srtp都通过ice传输)
+		1、ICE建连成功: 获取可用的数据传输通道
+		2、DTLS建连成功: 客户端获取服务器的证书公钥，并使用公钥加密对称密钥发送给对端，于是双方获取对方的对称加密密钥
+		3、RTP数据包使用对称加密密钥加密成SRTP后，通过ICE发送给对端，对端解密为RTP
+		4、获取对端的SRTP，使用对称加密密钥解密为RTP数据包
 	 */
 	err = pc.dtlsTransport.Start(DTLSParameters{
 		Role:         dtlsRole,

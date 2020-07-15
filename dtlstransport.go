@@ -355,8 +355,9 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		t.onStateChange(DTLSTransportStateFailed)
 		return fmt.Errorf("peer didn't provide certificate via DTLS")
 	}
+	//存储对端发送的密钥
 	t.remoteCertificate = remoteCerts[0]
-
+	//parse密钥并检验其合法性
 	parsedRemoteCert, err := x509.ParseCertificate(t.remoteCertificate)
 	if err != nil {
 		t.onStateChange(DTLSTransportStateFailed)
