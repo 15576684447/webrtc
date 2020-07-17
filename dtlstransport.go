@@ -13,13 +13,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"webrtc/webrtc/internal/mux"
+	"webrtc/webrtc/internal/util"
+	"webrtc/webrtc/pkg/rtcerr"
 
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/pkg/crypto/fingerprint"
 	"github.com/pion/srtp"
-	"github.com/pion/webrtc/v2/internal/mux"
-	"github.com/pion/webrtc/v2/internal/util"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
 )
 
 // DTLSTransport allows an application access to information about the DTLS

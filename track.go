@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"webrtc/webrtc/pkg/media"
 
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v2/pkg/media"
 )
 
 const (

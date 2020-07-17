@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/pion/webrtc/v2"
-	"github.com/pion/webrtc/v2/pkg/media"
-	"github.com/pion/webrtc/v2/pkg/media/ivfreader"
+	"webrtc/webrtc"
+	"webrtc/webrtc/pkg/media"
+	"webrtc/webrtc/pkg/media/ivfreader"
 )
 
 var peerConnection *webrtc.PeerConnection //nolint

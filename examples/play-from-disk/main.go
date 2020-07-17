@@ -7,11 +7,10 @@ import (
 	"math/rand"
 	"os"
 	"time"
-
-	"github.com/pion/webrtc/v2"
-	"github.com/pion/webrtc/v2/examples/internal/signal"
-	"github.com/pion/webrtc/v2/pkg/media"
-	"github.com/pion/webrtc/v2/pkg/media/ivfreader"
+	"webrtc/webrtc"
+	"webrtc/webrtc/examples/internal/signal"
+	"webrtc/webrtc/pkg/media"
+	"webrtc/webrtc/pkg/media/ivfreader"
 )
 
 func main() {

@@ -5,11 +5,10 @@ import (
 	"github.com/pion/logging"
 	"io"
 	"time"
+	"webrtc/webrtc"
+	"webrtc/webrtc/examples/internal/signal"
 
 	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v2"
-
-	"github.com/pion/webrtc/v2/examples/internal/signal"
 )
 
 const (

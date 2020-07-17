@@ -3,9 +3,8 @@ package main
 import (
 	"fmt"
 	"time"
-
-	"github.com/pion/webrtc/v2"
-	"github.com/pion/webrtc/v2/examples/internal/signal"
+	"webrtc/webrtc"
+	"webrtc/webrtc/examples/internal/signal"
 )
 
 func main() {

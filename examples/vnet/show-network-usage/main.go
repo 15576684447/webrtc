@@ -5,10 +5,10 @@ import (
 	"net"
 	"sync/atomic"
 	"time"
+	"webrtc/webrtc"
 
 	"github.com/pion/logging"
 	"github.com/pion/transport/vnet"
-	"github.com/pion/webrtc/v2"
 )
 
 /* VNet Configuration

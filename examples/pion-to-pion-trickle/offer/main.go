@@ -9,10 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/pion/webrtc/v2"
-
-	"github.com/pion/webrtc/v2/examples/internal/signal"
+	"webrtc/webrtc"
+	"webrtc/webrtc/examples/internal/signal"
 )
 
 func signalCandidate(addr string, c *webrtc.ICECandidate) error {
