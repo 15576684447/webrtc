@@ -21,7 +21,7 @@ func (c customLogger) Debugf(format string, args ...interface{}) {
 }
 func (c customLogger) Info(msg string) { fmt.Printf("customLogger Info: %s\n", msg) }
 func (c customLogger) Infof(format string, args ...interface{}) {
-	c.Trace(fmt.Sprintf(format, args...))
+	c.Info(fmt.Sprintf(format, args...))
 }
 func (c customLogger) Warn(msg string) { fmt.Printf("customLogger Warn: %s\n", msg) }
 func (c customLogger) Warnf(format string, args ...interface{}) {
