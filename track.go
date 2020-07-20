@@ -30,6 +30,8 @@ type Track struct {
 
 	packetizer rtp.Packetizer
 
+	//Track对应一个receiver和若干个senders，即从一个src接收数据，然后转发至多个dest
+	//而sender和receiver的核心即transport
 	receiver         *RTPReceiver
 	activeSenders    []*RTPSender
 	totalSenderCount int // count of all senders (accounts for senders that have not been started yet)

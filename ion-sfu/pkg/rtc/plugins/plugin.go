@@ -105,6 +105,8 @@ func (p *PluginChain) Init(config Config) error {
 	}
 
 	// forward packets along plugin chain
+	//类似pipeline的运行方式
+	//此处将链式plugins串到一起,原始数据从第一个plugin输入，前一个plugin的输出作为后一个plugin的输入，而最终从最后一个plugin的输出中读取
 	for i, plugin := range p.plugins {
 		if i == 0 {
 			continue

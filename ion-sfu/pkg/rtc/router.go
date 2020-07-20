@@ -64,7 +64,7 @@ func (r *Router) InitPlugins(config plugins.Config) error {
 
 func (r *Router) start() {
 	if routerConfig.REMBFeedback {
-		//接收端根据丢包情况调整带宽
+		//TODO:接收sub端的REMB反馈，汇总后进一步反馈到sub端上游
 		go r.rembLoop()
 	}
 	go func() {
@@ -77,7 +77,7 @@ func (r *Router) start() {
 			var pkt *rtp.Packet
 			var err error
 			// get rtp from pluginChain or pub
-			//如果使用了plugin，则从最后一个plugin中取出，否则直接从pub的conn中读取
+			//TODO:如果使用了plugin，则从最后一个plugin中取出，否则直接从pub的conn中读取
 			if r.pluginChain != nil && r.pluginChain.On() {
 				pkt = r.pluginChain.ReadRTP()
 			} else {
@@ -110,7 +110,12 @@ func (r *Router) start() {
 func (r *Router) AddPub(t transport.Transport) transport.Transport {
 	log.Logger.Infof("AddPub")
 	r.pub = t
-	//如果开启了plugin，则将从pub读取的数据包先写入plugin的buffer中处理，之后从plugin链的最后一个节点读取数据发送给接收端
+	/*
+	TODO:
+		因为此处将jitterBuffer作为链式plugins的第一个，
+		所以如果开启了plugins，则将第一个plugin(jitterBuffer)绑定到pub，
+		将从pub读取的原始数据写入到jitterBuffer，之后就会沿着链式plugins向下传递，直至最后一个
+	 */
 	r.pluginChain.AttachPub(t)
 	r.start()
 	t.OnClose(func() {
@@ -279,6 +284,7 @@ func (r *Router) AddSub(id string, t transport.Transport) transport.Transport {
 	r.subLock.Lock()
 	defer r.subLock.Unlock()
 	r.subs[id] = t
+	//TODO:每个sub分配一个1000大小的chan，pub端将读取的数据先写入subChans，sub端从对应的subChans读取数据即可
 	r.subChans[id] = make(chan *rtp.Packet, 1000)
 	log.Logger.Infof("Router.AddSub id=%s t=%p", id, t)
 
@@ -287,7 +293,9 @@ func (r *Router) AddSub(id string, t transport.Transport) transport.Transport {
 	})
 
 	// Sub loops
+	//sub端从subChans获取数据并发送
 	go r.subWriteLoop(id, t)
+	//接收sub端下游的feedback并转发至pub端上游
 	go r.subFeedbackLoop(id, t)
 	return t
 }

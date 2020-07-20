@@ -114,6 +114,7 @@ func AddRouter(id string) *Router {
 	router.OnClose(func() {
 		delRouter(id)
 	})
+	//TODO:构建流水型链式plugins，确定先后顺序 -> 此处将jitterBuffer设置为第一个plugin，数据将从jitterBuffer进入
 	if err := router.InitPlugins(pluginsConfig); err != nil {
 		log.Logger.Errorf("rtc.AddRouter InitPlugins err=%v", err)
 		return nil

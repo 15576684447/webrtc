@@ -112,10 +112,12 @@ func (t *RTPTransceiver) setSendingTrack(track *Track) error {
 	如果同时增加send和receive，则变为RTPTransceiverDirectionSendrecv
 	 */
 	switch {
+	//track不为nil，则增加send属性
 	case track != nil && t.Direction() == RTPTransceiverDirectionRecvonly:
 		t.setDirection(RTPTransceiverDirectionSendrecv)
 	case track != nil && t.Direction() == RTPTransceiverDirectionInactive:
 		t.setDirection(RTPTransceiverDirectionSendonly)
+	//track为nil，则移除send属性
 	case track == nil && t.Direction() == RTPTransceiverDirectionSendrecv:
 		t.setDirection(RTPTransceiverDirectionRecvonly)
 	case track == nil && t.Direction() == RTPTransceiverDirectionSendonly:

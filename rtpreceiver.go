@@ -77,8 +77,8 @@ func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error {
 		receiver: r,
 	}
 	//获取RTPReceiver的SRTPSession/SRTCPSession
-	//每个session都有一个对应的stream对象
-	//session收到裸数据后，经过解密，将可读性数据写入对应的stream对象的buffer中，供应用层使用
+	//每个session对应若干个stream对象，stream对象使用ssrc区分
+	//session收到裸数据后，经过解密，将可读性数据写入对应ssrc的stream对象的buffer中，供应用层使用
 	//所以Receive调用后，最终数据会在RTP/RTCP Stream对象的buffer中
 	srtpSession, err := r.transport.getSRTPSession()
 	if err != nil {
