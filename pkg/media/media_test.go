@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pion/webrtc/v2/pkg/media"
 	"github.com/stretchr/testify/assert"
+	"webrtc/webrtc/pkg/media"
 )
 
 func TestNSamples(t *testing.T) {

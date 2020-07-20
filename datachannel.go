@@ -118,13 +118,14 @@ func (d *DataChannel) open(sctpTransport *SCTPTransport) error {
 	var reliabilityParameter uint32
 
 	switch {
+	//无限重传
 	case d.maxPacketLifeTime == nil && d.maxRetransmits == nil:
 		if d.ordered {
 			channelType = datachannel.ChannelTypeReliable
 		} else {
 			channelType = datachannel.ChannelTypeReliableUnordered
 		}
-
+	//限制重传次数
 	case d.maxRetransmits != nil:
 		reliabilityParameter = uint32(*d.maxRetransmits)
 		if d.ordered {
@@ -132,6 +133,7 @@ func (d *DataChannel) open(sctpTransport *SCTPTransport) error {
 		} else {
 			channelType = datachannel.ChannelTypePartialReliableRexmitUnordered
 		}
+	//限制最长生命周期
 	default:
 		reliabilityParameter = uint32(*d.maxPacketLifeTime)
 		if d.ordered {

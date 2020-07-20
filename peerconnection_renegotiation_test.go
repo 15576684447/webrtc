@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v2/internal/util"
-	"github.com/pion/webrtc/v2/pkg/media"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"webrtc/webrtc/internal/util"
+	"webrtc/webrtc/pkg/media"
 )
 
 func sendVideoUntilDone(done <-chan struct{}, t *testing.T, tracks []*Track) {

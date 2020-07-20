@@ -18,8 +18,8 @@ import (
 
 	"github.com/pion/ice"
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
 	"github.com/stretchr/testify/assert"
+	"webrtc/webrtc/pkg/rtcerr"
 )
 
 // newPair creates two new peer connections (an offerer and an answerer) using

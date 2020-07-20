@@ -17,9 +17,9 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/sdp/v2"
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v2/pkg/media"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"webrtc/webrtc/pkg/media"
 )
 
 func offerMediaHasDirection(offer SessionDescription, kind RTPCodecType, direction RTPTransceiverDirection) bool {

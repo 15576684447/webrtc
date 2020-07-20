@@ -56,6 +56,7 @@ func TestNewICEGatherer_Success(t *testing.T) {
 	if len(candidates) == 0 {
 		t.Fatalf("No candidates gathered")
 	}
+	t.Logf("candidate: %+v\n", candidates)
 
 	assert.NoError(t, gatherer.Close())
 }
