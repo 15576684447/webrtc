@@ -4,18 +4,17 @@ package ice
 
 import (
 	"context"
+	"github.com/pion/logging"
+	"github.com/pion/mdns"
+	"github.com/pion/stun"
+	"github.com/pion/transport/packetio"
+	"github.com/pion/transport/vnet"
 	"math/rand"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/pion/logging"
-	"github.com/pion/mdns"
-	"github.com/pion/stun"
-	"github.com/pion/transport/packetio"
-	"github.com/pion/transport/vnet"
 )
 
 const (
@@ -447,7 +446,9 @@ func NewAgent(config *AgentConfig) (*Agent, error) {
 	// Initialize local candidates
 	if !a.trickle {
 		//开始收集Candidate，重要入口!!!
+		a.log.Debugf("NewAgent: start gatherCandidates***************")
 		<-a.gatherCandidates()
+		a.log.Debugf("NewAgent: end gatherCandidates***************")
 	}
 	return a, nil
 }
@@ -879,30 +880,33 @@ func (a *Agent) addCandidate(c Candidate, candidateConn net.PacketConn) error {
 	return a.run(func(agent *Agent) {
 		//start函数为该Candidate启动了专属recvLoop，专门用于处理接收该Candidate的消息(handleInboundCandidateMsg)
 		//根据收到的消息，判断当前Binding结果是否成功，提名是否成功
+		a.log.Debugf("addCandidate: NetworkType=%s\n", c.NetworkType().String())
 		c.start(a, candidateConn)
 		//获取同网络类型的local candidate，检查是否已经包含了该candidate
 		//如果没包含，添加该candidate到同类集合
 		set := a.localCandidates[c.NetworkType()]
 		for _, candidate := range set {
 			if candidate.Equal(c) {
+				a.log.Debugf("addCandidate: duplicate candidate %+v, close it\n", c)
 				if err := c.close(); err != nil {
 					a.log.Warnf("Failed to close duplicate candidate: %v", err)
 				}
 				return
 			}
 		}
-
+		a.log.Debugf("addCandidate: add candidate %+v to set [%+v]\n", c, set)
 		set = append(set, c)
 		a.localCandidates[c.NetworkType()] = set
 		//获取同网络类型的remote candidate，并依次和该candidate组成pair加入到checklist，等待连通性测试
 		if remoteCandidates, ok := a.remoteCandidates[c.NetworkType()]; ok {
 			for _, remoteCandidate := range remoteCandidates {
+				a.log.Debugf("addCandidate: addPair <%+v>|<%+v>\n", c, remoteCandidate)
 				a.addPair(c, remoteCandidate)
 			}
 		}
 		//立马开始连通性测试
 		a.requestConnectivityCheck()
-
+		a.log.Debugf("addCandidate: candidate %+v requestConnectivityCheck\n", c)
 		a.chanCandidate <- c
 	})
 }

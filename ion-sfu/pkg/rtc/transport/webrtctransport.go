@@ -183,6 +183,7 @@ func NewWebRTCTransport(id string, options RTCOptions) *WebRTCTransport {
 		candidateCh: make(chan *webrtc.ICECandidate, maxChanSize),
 		ssrcPtMap:   make(map[uint32]uint8),
 	}
+	//使用MediaEngine和SettingEngine初始化 webrtc API
 	w.init(options)
 
 	var err error

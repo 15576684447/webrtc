@@ -68,6 +68,11 @@ func (r *Router) start() {
 		go r.rembLoop()
 	}
 	go func() {
+		if r.pluginChain != nil && r.pluginChain.On() {
+			log.Logger.Debugf("Router[%s] pluginChain On, pkt will read from plugin\n", r.id)
+		} else {
+			log.Logger.Debugf("Router[%s] pluginChain Off, pkt will read from webrtc rtp connection\n", r.id)
+		}
 		defer util.Recover("[Router.start]")
 		for {
 			if r.stop {
@@ -108,7 +113,7 @@ func (r *Router) start() {
 
 // AddPub add a pub transport to the router
 func (r *Router) AddPub(t transport.Transport) transport.Transport {
-	log.Logger.Infof("AddPub")
+	log.Logger.Infof("AddPub for Router, id=%s\n", r.id)
 	r.pub = t
 	/*
 	TODO:

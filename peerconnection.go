@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"webrtc/webrtc/internal/util"
+	"webrtc/webrtc/ion-sfu/pkg/log"
 	"webrtc/webrtc/pkg/rtcerr"
 
 	"github.com/pion/logging"
@@ -112,20 +113,23 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 		connectionState:              PeerConnectionStateNew,
 
 		api: api,
-		log: api.settingEngine.LoggerFactory.NewLogger("pc"),
+		log: log.InitLogger("pc"),
+		//log: api.settingEngine.LoggerFactory.NewLogger("pc"),
 	}
-
+	pc.log.Debugf("NewPeerConnection: before config: %+#v\n", pc)
 	var err error
+	//如果configuration指定了对应参数，就用以替换pc对应的默认值
 	if err = pc.initConfiguration(configuration); err != nil {
 		return nil, err
 	}
-
+	pc.log.Debugf("NewPeerConnection: after config: %+#v\n", pc)
 	pc.iceGatherer, err = pc.createICEGatherer()
 	if err != nil {
 		return nil, err
 	}
-
+	pc.log.Debugf("NewPeerConnection: ICETrickle=%v\n", pc.api.settingEngine.candidates.ICETrickle)
 	if !pc.api.settingEngine.candidates.ICETrickle {
+		pc.log.Debugf("NewPeerConnection: pc.iceGatherer.Gather()\n")
 		if err = pc.iceGatherer.Gather(); err != nil {
 			return nil, err
 		}
@@ -473,6 +477,8 @@ func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription
 }
 
 func (pc *PeerConnection) createICEGatherer() (*ICEGatherer, error) {
+	//指定IceServers以及Ice搜集策略
+	pc.log.Debugf("createICEGatherer: IceService=%s, ICETransportPolicy: %s\n", pc.configuration.getICEServers(), pc.configuration.ICETransportPolicy)
 	g, err := pc.api.NewICEGatherer(ICEGatherOptions{
 		ICEServers:      pc.configuration.getICEServers(),
 		ICEGatherPolicy: pc.configuration.ICETransportPolicy,

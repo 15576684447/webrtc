@@ -81,6 +81,7 @@ func (j *JitterBuffer) ID() string {
 //AttachPub后，webrtc将读取的数据包写入jitterBuffer，而不是直接转发
 func (j *JitterBuffer) AttachPub(t transport.Transport) {
 	j.Pub = t
+	log.Logger.Debugf("AttachPub: transport[%s] will write to jitterBuffer[%s]\n", t.ID(), j.ID())
 	go func() {
 		for {
 			if j.stop {
@@ -133,6 +134,7 @@ func (j *JitterBuffer) WriteRTP(pkt *rtp.Packet) error {
 
 	// only video, because opus doesn't need nack, use fec: `a=fmtp:111 minptime=10;useinbandfec=1`
 	if transport.IsVideo(pt) {
+		//获取视频buffer，如果不存在，新建一个对应ssrc的buffer
 		buffer := j.GetBuffer(ssrc)
 		if buffer == nil {
 			buffer = j.AddBuffer(ssrc)

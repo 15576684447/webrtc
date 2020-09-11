@@ -32,17 +32,20 @@ func Serve(port int) (chan *transport.RTPTransport, error) {
 	}
 	ch := make(chan *transport.RTPTransport, maxRtpConnSize)
 	var err error
+	//建立UDP监听
 	listener, err = udp.Listen("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port})
 	if err != nil {
 		log.Logger.Errorf("failed to listen %v", err)
 		return nil, err
 	}
+	log.Logger.Debugf("Server rtp with udp: %+v\n", net.UDPAddr{IP: net.IPv4zero, Port: port})
 
 	go func() {
 		for {
 			if stop {
 				return
 			}
+			//接收连接后，将RTPTransport信息发送到chan
 			conn, err := listener.Accept()
 			if err != nil {
 				log.Logger.Errorf("failed to accept conn %v", err)
@@ -51,6 +54,7 @@ func Serve(port int) (chan *transport.RTPTransport, error) {
 			log.Logger.Infof("accept new rtp conn %s", conn.RemoteAddr().String())
 
 			ch <- transport.NewRTPTransport(conn)
+			log.Logger.Debugf("send rtp conn %s to channel\n", conn.RemoteAddr().String())
 		}
 	}()
 	return ch, nil

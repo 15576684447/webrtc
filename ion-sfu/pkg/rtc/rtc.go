@@ -54,11 +54,14 @@ func InitRTP(port int, kcpKey, kcpSalt string) error {
 	var connCh chan *transport.RTPTransport
 	var err error
 	// accept relay rtptransport
+	//toml文件当前未指定Key和Salt
+	//建立RTP监听，并将接受的连接发送到返回的connCh中
 	if kcpKey != "" && kcpSalt != "" {
 		connCh, err = rtpengine.ServeWithKCP(port, kcpKey, kcpSalt)
 	} else {
 		connCh, err = rtpengine.Serve(port)
 	}
+	log.Logger.Debugf("Server rtp with key: %s, salt: %s\n", kcpKey, kcpSalt)
 	if err != nil {
 		log.Logger.Errorf("rtc.InitRPC err=%v", err)
 		return err
@@ -68,6 +71,7 @@ func InitRTP(port int, kcpKey, kcpSalt string) error {
 			if stop {
 				return
 			}
+			//异步处理RTP连接connCh
 			for rtpTransport := range connCh {
 				go func(rtpTransport *transport.RTPTransport) {
 					id := <-rtpTransport.IDChan
@@ -77,7 +81,8 @@ func InitRTP(port int, kcpKey, kcpSalt string) error {
 						return
 					}
 
-					log.Logger.Infof("accept new rtp id=%s conn=%s", id, rtpTransport.RemoteAddr().String())
+					log.Logger.Infof("accept new rtp from channel id=%s conn=%s", id, rtpTransport.RemoteAddr().String())
+					//每个到来的连接对应一个Router，并初始化其Pub
 					if router := AddRouter(id); router != nil {
 						router.AddPub(rtpTransport)
 					}

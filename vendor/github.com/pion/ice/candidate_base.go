@@ -93,7 +93,7 @@ func (c *candidateBase) recvLoop() {
 		if err != nil {
 			return
 		}
-
+		log.Debugf("recvLoop: conn=%s, recv from %s, content=%+v\n", c.address, srcAddr.String(), buffer[:n])
 		handleInboundCandidateMsg(c, buffer[:n], srcAddr, log)
 	}
 }

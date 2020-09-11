@@ -108,14 +108,17 @@ func (p *PluginChain) Init(config Config) error {
 	//类似pipeline的运行方式
 	//此处将链式plugins串到一起,原始数据从第一个plugin输入，前一个plugin的输出作为后一个plugin的输入，而最终从最后一个plugin的输出中读取
 	for i, plugin := range p.plugins {
+		//第1个plugin直接从webrtc的rtp连接中获取pkt
 		if i == 0 {
+			log.Logger.Debugf("no need to bundle goroutine for first plugin\n")
 			continue
 		}
+		//TODO:从第2个plugin开始，为每个plugin绑定一个goroutine，从上一个plugin的outRTPChan获取数据，并写入到当前plugin及其outRTPChan中
 		go func(i int, plugin Plugin) {
 			if p.stop {
 				return
 			}
-
+			log.Logger.Debugf("bundle goroutine for plugin: index=%d\n", i+1)
 			for pkt := range p.plugins[i-1].ReadRTP() {
 				err := plugin.WriteRTP(pkt)
 
@@ -139,7 +142,7 @@ func (p *PluginChain) On() bool {
 func (p *PluginChain) AttachPub(pub transport.Transport) {
 	jitterBuffer := p.GetPlugin(TypeJitterBuffer)
 	if jitterBuffer != nil {
-		log.Logger.Infof("PluginChain.AttachPub pub=%+v", pub)
+		log.Logger.Infof("PluginChain.AttachPub, plugin=%s, pub=%+v", jitterBuffer.ID(), pub)
 		jitterBuffer.(*JitterBuffer).AttachPub(pub)
 	}
 }

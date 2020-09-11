@@ -5,6 +5,7 @@ package webrtc
 import (
 	"sync"
 	"sync/atomic"
+	"webrtc/webrtc/ion-sfu/pkg/log"
 
 	"github.com/pion/ice"
 	"github.com/pion/logging"
@@ -50,7 +51,8 @@ func (api *API) NewICEGatherer(opts ICEGatherOptions) (*ICEGatherer, error) {
 		gatherPolicy:     opts.ICEGatherPolicy,
 		validatedServers: validatedServers,
 		api:              api,
-		log:              api.settingEngine.LoggerFactory.NewLogger("ice"),
+		log:				log.InitLogger("ice"),
+		//log:              api.settingEngine.LoggerFactory.NewLogger("ice"),
 	}, nil
 }
 
@@ -94,7 +96,8 @@ func (g *ICEGatherer) createAgent() error {
 		PortMax:                   g.api.settingEngine.ephemeralUDP.PortMax,
 		ConnectionTimeout:         g.api.settingEngine.timeout.ICEConnection,
 		KeepaliveInterval:         g.api.settingEngine.timeout.ICEKeepalive,
-		LoggerFactory:             g.api.settingEngine.LoggerFactory,
+		//LoggerFactory:             g.api.settingEngine.LoggerFactory,
+		LoggerFactory:             log.CustomLoggerFactory{},
 		CandidateTypes:            candidateTypes,
 		CandidateSelectionTimeout: g.api.settingEngine.timeout.ICECandidateSelectionTimeout,
 		HostAcceptanceMinWait:     g.api.settingEngine.timeout.ICEHostAcceptanceMinWait,
@@ -119,6 +122,7 @@ func (g *ICEGatherer) createAgent() error {
 	for _, typ := range requestedNetworkTypes {
 		config.NetworkTypes = append(config.NetworkTypes, ice.NetworkType(typ))
 	}
+	g.log.Debugf("createAgent: ice.AgentConfig=%+#v\n", config)
 	//代理用于搜集candidate!!!
 	agent, err := ice.NewAgent(config)
 	if err != nil {

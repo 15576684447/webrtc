@@ -102,6 +102,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 
 		if err := a.run(func(agent *Agent) {
 			a.gatheringState = GatheringStateGathering
+			a.log.Debugf("gatherCandidates: set gatheringState = GatheringStateGathering\n")
 			close(gatherStateUpdated)
 		}); err != nil {
 			a.log.Warnf("failed to set gatheringState to GatheringStateGathering for gatherCandidates: %v", err)
@@ -134,6 +135,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				   3.如果解析出IP地址，则替换该mDNS域名对应的主机名，然后继续按照[ RFC8445 ]中定义的方法处理candidate。
 				   4.否则，忽略该candidate。
 				*/
+				a.log.Debugf("gatherCandidates -> gatherCandidatesLocal\n")
 				a.gatherCandidatesLocal(a.networkTypes)
 			case CandidateTypeServerReflexive:
 				//通过指定STUN服务器地址来获取外部IP
@@ -148,9 +150,11 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				并将Binding respons返回给STUN客户端。当包通过NAT返回时，NAT将修改IP报头中的dest addr，
 				但STUN body中的XOR-MAPPED-address属性将保持不变。如此客户端就可以获取到自身网络的外网NAT映射结果了。
 				*/
+				a.log.Debugf("gatherCandidates -> gatherCandidatesSrflx\n")
 				a.gatherCandidatesSrflx(a.urls, a.networkTypes)
 				//如果指定IPMapper
 				if a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeServerReflexive {
+					a.log.Debugf("gatherCandidates -> gatherCandidatesSrflxMapped\n")
 					a.gatherCandidatesSrflxMapped(a.networkTypes)
 				}
 			case CandidateTypeRelay:
@@ -173,6 +177,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				Send and Data机制：客户端发送给relay服务端的数据中包含（a）一个XOR-PEER-ADDRESS属性，该属性指定对端的传输地址(NAT映射地址)，以及（b）一个包含数据的data属性
 				channels机制：使用ChannelData的备用数据包格式。该格式有一个4字节的头，其中包含一个称为channel number的数字。每个通道号都绑定到特定的对端，因此用作对端主机传输地址的简写
 				*/
+				a.log.Debugf("gatherCandidates -> gatherCandidatesRelay\n")
 				if err := a.gatherCandidatesRelay(a.urls); err != nil {
 					a.log.Errorf("Failed to gather relay candidates: %v\n", err)
 				}
@@ -183,6 +188,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				close(agent.chanCandidate)
 			})
 			a.gatheringState = GatheringStateComplete
+			a.log.Debugf("gatherCandidates: set gatheringState = GatheringStateGathering\n")
 		}); err != nil {
 			a.log.Warnf("Failed to stop OnCandidate handler routine and update gatheringState: %v\n", err)
 			return
@@ -198,13 +204,15 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 		a.log.Warnf("failed to iterate local interfaces, host candidates will not be gathered %s", err)
 		return
 	}
-
+	a.log.Debugf("gatherCandidatesLocal: localIps=%+v\n", localIPs)
 	for _, ip := range localIPs {
+		a.log.Debugf("gatherCandidatesLocal: current IP = %s\n", ip.String())
 		mappedIP := ip
 		//如果caididate搜集端和接收端不同时支持mDNS域名模式，解析ip地址对应的外网IP
 		if a.mDNSMode != MulticastDNSModeQueryAndGather && a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeHost {
 			if _mappedIP, err := a.extIPMapper.findExternalIP(ip.String()); err == nil {
 				mappedIP = _mappedIP
+				a.log.Debugf("gatherCandidatesLocal: 1:1 NAT mapping is enabled, external IP is %s\n", mappedIP.String())
 			} else {
 				a.log.Warnf("1:1 NAT mapping is enabled but no external IP is found for %s\n", ip.String())
 			}
@@ -213,6 +221,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 		address := mappedIP.String()
 		//如果caididate搜集端和接收端都支持mDNS域名模式，直接使用域名
 		if a.mDNSMode == MulticastDNSModeQueryAndGather {
+			a.log.Debugf("gatherCandidatesLocal: MulticastDNSModeQueryAndGather\n")
 			address = a.mDNSName
 		}
 
@@ -222,7 +231,6 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 				a.log.Warnf("could not listen %s %s\n", network, ip)
 				continue
 			}
-
 			port := conn.LocalAddr().(*net.UDPAddr).Port
 			hostConfig := CandidateHostConfig{
 				Network:   network,
@@ -230,7 +238,7 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 				Port:      port,
 				Component: ComponentRTP,
 			}
-
+			a.log.Debugf("gatherCandidatesLocal: listenUDPInPortRange ok, CandidateHost: %+v\n", hostConfig)
 			c, err := NewCandidateHost(&hostConfig)
 			if err != nil {
 				closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create host candidate: %s %s %d: %v\n", network, mappedIP, port, err))
@@ -238,11 +246,13 @@ func (a *Agent) gatherCandidatesLocal(networkTypes []NetworkType) {
 			}
 			//如果是mDNS模式，需要设置真实IP
 			if a.mDNSMode == MulticastDNSModeQueryAndGather {
+				a.log.Debugf("gatherCandidatesLocal: mDNSMode, set ip: %+v\n", ip)
 				if err = c.setIP(ip); err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create host candidate: %s %s %d: %v\n", network, mappedIP, port, err))
 					continue
 				}
 			}
+			a.log.Debugf("gatherCandidatesLocal: addCandidate %+v to candidate list\n", c)
 			//此处是重点，每次增加一个Candidate，就为其新建一个专属recvLoop，专门接收并处理该连接上的消息!!!
 			if err := a.addCandidate(c, conn); err != nil {
 				if closeErr := c.close(); closeErr != nil {
@@ -270,7 +280,7 @@ func (a *Agent) gatherCandidatesSrflxMapped(networkTypes []NetworkType) {
 			closeConnAndLog(conn, a.log, fmt.Sprintf("1:1 NAT mapping is enabled but no external IP is found for %s\n", laddr.IP.String()))
 			continue
 		}
-
+		a.log.Debugf("gatherCandidatesSrflxMapped: findExternalIP %s -> %s\n", laddr.IP.String(), mappedIP.String())
 		srflxConfig := CandidateServerReflexiveConfig{
 			Network:   network,
 			Address:   mappedIP.String(),
@@ -279,6 +289,7 @@ func (a *Agent) gatherCandidatesSrflxMapped(networkTypes []NetworkType) {
 			RelAddr:   laddr.IP.String(),
 			RelPort:   laddr.Port,
 		}
+		a.log.Debugf("gatherCandidatesSrflxMapped: CandidateServerReflexive %+v\n", srflxConfig)
 		c, err := NewCandidateServerReflexive(&srflxConfig)
 		if err != nil {
 			closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create server reflexive candidate: %s %s %d: %v\n",
@@ -288,7 +299,7 @@ func (a *Agent) gatherCandidatesSrflxMapped(networkTypes []NetworkType) {
 				err))
 			continue
 		}
-
+		a.log.Debugf("gatherCandidatesSrflxMapped: addCandidate %+v\n", c)
 		if err := a.addCandidate(c, conn); err != nil {
 			if closeErr := c.close(); closeErr != nil {
 				a.log.Warnf("Failed to close candidate: %v", closeErr)
@@ -310,18 +321,21 @@ func (a *Agent) gatherCandidatesSrflx(urls []*URL, networkTypes []NetworkType) {
 			go func(url URL, network string) {
 				defer wg.Done()
 				hostPort := fmt.Sprintf("%s:%d", url.Host, url.Port)
+				a.log.Debugf("gatherCandidatesSrflx: hostPort=%s\n", hostPort)
 				serverAddr, err := a.net.ResolveUDPAddr(network, hostPort)
 				if err != nil {
 					a.log.Warnf("failed to resolve stun host: %s: %v", hostPort, err)
 					return
 				}
-
+				a.log.Debugf("gatherCandidatesSrflx: ResolveUDPAddr=%+v\n", serverAddr)
 				conn, err := listenUDPInPortRange(a.net, a.log, int(a.portmax), int(a.portmin), network, &net.UDPAddr{IP: nil, Port: 0})
 				if err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to listen for %s: %v\n", serverAddr.String(), err))
 					return
 				}
+				a.log.Debugf("ResolveUDPAddr: listenUDPInPortRange [%+v] ~ [%+v]\n", a.portmin, a.portmax)
 				//请求STUN服务器，并解析返回数据包的XOR-MAPPED-address属性，获取映射公网IP
+				a.log.Debugf("ResolveUDPAddr: getXORMappedAddr -> send stun request\n")
 				xoraddr, err := getXORMappedAddr(conn, serverAddr, stunGatherTimeout)
 				if err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("could not get server reflexive address %s %s: %v\n", network, url, err))
@@ -340,12 +354,13 @@ func (a *Agent) gatherCandidatesSrflx(urls []*URL, networkTypes []NetworkType) {
 					RelAddr:   laddr.IP.String(),
 					RelPort:   laddr.Port,
 				}
+				a.log.Debugf("getXORMappedAddr: CandidateServerReflexive %+v\n", srflxConfig)
 				c, err := NewCandidateServerReflexive(&srflxConfig)
 				if err != nil {
 					closeConnAndLog(conn, a.log, fmt.Sprintf("Failed to create server reflexive candidate: %s %s %d: %v\n", network, ip, port, err))
 					return
 				}
-
+				a.log.Debugf("getXORMappedAddr: addCandidate %+v\n", c)
 				if err := a.addCandidate(c, conn); err != nil {
 					if closeErr := c.close(); closeErr != nil {
 						a.log.Warnf("Failed to close candidate: %v", closeErr)
@@ -365,6 +380,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 
 	network := NetworkTypeUDP4.String() // TODO IPv6
 	for i := range urls {
+		a.log.Debugf("gatherCandidatesRelay: urls[%d]=%+v\n", i, urls[i])
 		switch {
 		case urls[i].Scheme != SchemeTypeTURN && urls[i].Scheme != SchemeTypeTURNS:
 			continue
@@ -378,6 +394,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 		go func(url URL) {
 			defer wg.Done()
 			TURNServerAddr := fmt.Sprintf("%s:%d", url.Host, url.Port)
+			a.log.Debugf("gatherCandidatesRelay: TurnServerAddr %s, proto=%s, schema=%s\n", TURNServerAddr, url.Proto, url.Scheme)
 			var (
 				locConn net.PacketConn
 				err     error
@@ -451,6 +468,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				a.log.Warnf("Unable to handle URL in gatherCandidatesRelay %v\n", url)
 				return
 			}
+			a.log.Debugf("gatherCandidatesRelay: turn.NewClient\n")
 			//创建turn客户端，采用user+passwd认证方式
 			client, err := turn.NewClient(&turn.ClientConfig{
 				TURNServerAddr: TURNServerAddr,
@@ -464,7 +482,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 				closeConnAndLog(locConn, a.log, fmt.Sprintf("Failed to build new turn.Client %s %s\n", TURNServerAddr, err))
 				return
 			}
-
+			a.log.Debugf("gatherCandidatesRelay: client.Listen\n")
 			if err = client.Listen(); err != nil {
 				client.Close()
 				closeConnAndLog(locConn, a.log, fmt.Sprintf("Failed to listen on turn.Client %s %s\n", TURNServerAddr, err))
@@ -472,6 +490,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 			}
 			//客户端请求STUN服务器创建Allocate，服务器返回可用的Allocate
 			//一旦分配了中继服务器传输地址，客户端必须进行保活。为此，客户端定期向服务器发送Refresh请求
+			a.log.Debugf("gatherCandidatesRelay: client.Allocate\n")
 			relayConn, err := client.Allocate()
 			if err != nil {
 				client.Close()
@@ -492,6 +511,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 					return locConn.Close()
 				},
 			}
+			a.log.Debugf("gatherCandidatesRelay: CandidateRelay %+v\n", relayConfig)
 			candidate, err := NewCandidateRelay(&relayConfig)
 			if err != nil {
 				if relayConErr := relayConn.Close(); relayConErr != nil {
@@ -504,6 +524,7 @@ func (a *Agent) gatherCandidatesRelay(urls []*URL) error {
 			}
 			//turn relay模式下，获取的是turn的candidate
 			//客户端将消息发送给STUN服务器，STUN服务器将消息中继到对端
+			a.log.Debugf("CandidateRelay: addCandidate %+v\n", candidate)
 			if err := a.addCandidate(candidate, relayConn); err != nil {
 				if closeErr := candidate.close(); closeErr != nil {
 					a.log.Warnf("Failed to close candidate: %v", closeErr)

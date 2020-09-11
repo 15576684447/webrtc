@@ -255,6 +255,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.log.Debugf("Allocate: PerformTransaction for allocation, send msg=%+v to stunServer=%s\n", msg, c.turnServ.String())
 	//发送TURN allocation request
 	trRes, err := c.PerformTransaction(msg, c.turnServ, false)
 	if err != nil {
@@ -291,6 +292,7 @@ func (c *Client) Allocate() (net.PacketConn, error) {
 		return nil, err
 	}
 	//发送TURN allocation认证
+	c.log.Debugf("Allocate: PerformTransaction for authenticate, send msg=%+v to stunServer=%s\n", msg, c.turnServ.String())
 	trRes, err = c.PerformTransaction(msg, c.turnServ, false)
 	if err != nil {
 		return nil, err
