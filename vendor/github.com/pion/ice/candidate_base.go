@@ -86,14 +86,15 @@ func (c *candidateBase) recvLoop() {
 		close(c.closedCh)
 	}()
 
-	log := c.agent().log
+	//log := c.agent().log
+	log := c.agent().loggerFactory.NewLogger(fmt.Sprintf("@@@ candidate %s", c.Address()))
 	buffer := make([]byte, receiveMTU)
 	for {
 		n, srcAddr, err := c.conn.ReadFrom(buffer)
 		if err != nil {
 			return
 		}
-		log.Debugf("recvLoop: conn=%s, recv from %s, content=%+v\n", c.address, srcAddr.String(), buffer[:n])
+		//log.Debugf("recvLoop: conn=%s, recv from %s, content=%+v\n", c.address, srcAddr.String(), buffer[:n])
 		handleInboundCandidateMsg(c, buffer[:n], srcAddr, log)
 	}
 }
@@ -106,27 +107,28 @@ func handleInboundCandidateMsg(c Candidate, buffer []byte, srcAddr net.Addr, log
 		// Explicitly copy raw buffer so Message can own the memory.
 		copy(m.Raw, buffer)
 		if err := m.Decode(); err != nil {
-			log.Warnf("Failed to handle decode ICE from %s to %s: %v", c.addr(), srcAddr, err)
+			log.Warnf("handleInboundCandidateMsg: Failed to handle decode ICE from %s to %s: %v", c.addr(), srcAddr, err)
 			return
 		}
+		log.Debugf("handleInboundCandidateMsg: conn=%s, decode stun.Message -> %+v\n", c.Address(), m)
 		err := c.agent().run(func(agent *Agent) {
 			agent.handleInbound(m, c, srcAddr)
 		})
 		if err != nil {
-			log.Warnf("Failed to handle message: %v", err)
+			log.Warnf("handleInboundCandidateMsg: Failed to handle message: %v", err)
 		}
 
 		return
 	}
 
 	if !c.agent().validateNonSTUNTraffic(c, srcAddr) {
-		log.Warnf("Discarded message from %s, not a valid remote candidate", c.addr())
+		log.Warnf("handleInboundCandidateMsg: Discarded message from %s, not a valid remote candidate", c.addr())
 		return
 	}
 
 	// NOTE This will return packetio.ErrFull if the buffer ever manages to fill up.
 	if _, err := c.agent().buffer.Write(buffer); err != nil {
-		log.Warnf("failed to write packet")
+		log.Warnf("handleInboundCandidateMsg: failed to write packet")
 	}
 }
 

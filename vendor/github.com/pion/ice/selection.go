@@ -79,14 +79,14 @@ func (s *controllingSelector) ContactCandidates() {
 	case s.agent.getSelectedPair() != nil:
 		//对selectPair进行心跳保活
 		if s.agent.validateSelectedPair() {
-			s.log.Trace("checking keepalive")
+			s.log.Debug("controllingSelector ContactCandidates: checking keepalive")
 			s.agent.checkKeepalive()
 		}
 	//如果上一步没有selectPair，但是有待提名的pair，则进行提名操作；没有提名操作才会运行之后的case
 	case s.nominatedPair != nil:
 		//在nominatePair上持续的发送Binding request，直至达到上限或者一致有效
 		if s.nominationRequestCount > s.agent.maxBindingRequests {
-			s.log.Trace("max nomination requests reached, setting the connection state to failed")
+			s.log.Debug("controllingSelector ContactCandidates: max nomination requests reached, setting the connection state to failed")
 			s.agent.updateConnectionState(ConnectionStateFailed)
 			return
 		}
@@ -99,7 +99,7 @@ func (s *controllingSelector) ContactCandidates() {
 		//对checklist进行连通性，此处会对checklist进行优先级排序，选择优先级最高的进行提名
 		p := s.agent.getBestValidCandidatePair()
 		if p != nil && s.isNominatable(p.local) && s.isNominatable(p.remote) {
-			s.log.Tracef("Nominatable pair found, nominating (%s, %s)", p.local.String(), p.remote.String())
+			s.log.Debugf("controllingSelector ContactCandidates: Nominatable pair found, nominating (%s, %s)", p.local.String(), p.remote.String())
 			p.nominated = true
 			s.nominatedPair = p
 			//提名其实就是发送Binding request的过程
@@ -132,7 +132,7 @@ func (s *controllingSelector) nominatePair(pair *candidatePair) {
 		return
 	}
 
-	s.log.Tracef("ping STUN (nominate candidate pair) from %s to %s\n", pair.local.String(), pair.remote.String())
+	s.log.Debugf("controllingSelector nominatePair: ping STUN (nominate candidate pair) from %s to %s\n", pair.local.String(), pair.remote.String())
 	s.agent.sendBindingRequest(msg, pair.local, pair.remote)
 	s.nominationRequestCount++
 }
@@ -150,6 +150,7 @@ func (s *controllingSelector) nominatePair(pair *candidatePair) {
 //如果该pair状态为Succeeded，但是还没有正在提名的pair，也没成功提名的pair
 //检查该pair是否为chekelist中优先级最高的pair，如果是，则设置该pair为待提名pair，并进行提名操作
 func (s *controllingSelector) HandleBindingRequest(m *stun.Message, local, remote Candidate) {
+	s.log.Debugf("controllingSelector HandleBindingRequest: conn %s, sendBindingSuccess response\n", local.Address())
 	s.agent.sendBindingSuccess(m, local, remote)
 	//如果checklist中还未保存该pair，则增加该pair
 	p := s.agent.findPair(local, remote)
@@ -163,9 +164,9 @@ func (s *controllingSelector) HandleBindingRequest(m *stun.Message, local, remot
 	if p.state == CandidatePairStateSucceeded && s.nominatedPair == nil && s.agent.getSelectedPair() == nil {
 		bestPair := s.agent.getBestAvailableCandidatePair()
 		if bestPair == nil {
-			s.log.Tracef("No best pair available\n")
+			s.log.Debug("controllingSelector HandleBindingRequest: No best pair available\n")
 		} else if bestPair.Equal(p) && s.isNominatable(p.local) && s.isNominatable(p.remote) {
-			s.log.Tracef("The candidate (%s, %s) is the best candidate available, marking it as nominated\n",
+			s.log.Debugf("controllingSelector HandleBindingRequest: The candidate (%s, %s) is the best candidate available, marking it as nominated\n",
 				p.local.String(), p.remote.String())
 			s.nominatedPair = p
 			s.nominatePair(p)
@@ -205,7 +206,7 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 		return
 	}
 
-	s.log.Tracef("inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Tracef("controllingSelector HandleSuccessResponse: conn %s, inbound STUN (SuccessResponse) from %s to %s", local.String(), remote.String(), local.String())
 	//从checklist中找到对应的(local, remote) pair
 	p := s.agent.findPair(local, remote)
 
@@ -216,10 +217,11 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 	}
 	//将该pair状态置为Succeeded，并设置为SelectedPair
 	p.state = CandidatePairStateSucceeded
-	s.log.Tracef("Found valid candidate pair: %s", p)
+	s.log.Tracef("controllingSelector HandleSuccessResponse: Found valid candidate pair: %s", p)
 	//isUseCandidate作为提名请求的标志，表示某对CandidatePair提名成功
 	//如果此时SelectedPair为空，则将此次提名成功的CandidatePair作为Selected Pair
 	if pendingRequest.isUseCandidate && s.agent.getSelectedPair() == nil {
+		s.log.Tracef("controllingSelector HandleSuccessResponse: use candidate pair as selected pair: %s", p)
 		s.agent.setSelectedPair(p)
 	}
 }
@@ -255,12 +257,12 @@ func (s *controlledSelector) Start() {
 func (s *controlledSelector) ContactCandidates() {
 	if s.agent.getSelectedPair() != nil {
 		if s.agent.validateSelectedPair() {
-			s.log.Trace("checking keepalive")
+			s.log.Debugf("controlledSelector ContactCandidates: checking keepalive")
 			s.agent.checkKeepalive()
 		}
 	} else {
 		if time.Since(s.startTime) > s.agent.candidateSelectionTimeout {
-			s.log.Trace("check timeout reached and no valid candidate pair found, marking connection as failed")
+			s.log.Debugf("controlledSelector ContactCandidates: check timeout reached and no valid candidate pair found, marking connection as failed")
 			s.agent.updateConnectionState(ConnectionStateFailed)
 		} else {
 			s.agent.pingAllCandidates()
@@ -310,7 +312,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 		return
 	}
 
-	s.log.Tracef("inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Debugf("controlledSelector HandleSuccessResponse: conn %s, inbound STUN (SuccessResponse) from %s to %s -> %+v\n", local.String(), remote.String(), local.String(), m)
 
 	p := s.agent.findPair(local, remote)
 	if p == nil {
@@ -320,7 +322,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 	}
 
 	p.state = CandidatePairStateSucceeded
-	s.log.Tracef("Found valid candidate pair: %s", p)
+	s.log.Debugf("controlledSelector HandleSuccessResponse: Found valid candidate pair: %s", p)
 }
 
 //controlled端处理controlling端 BindingRequest
@@ -330,7 +332,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 	//如果该pair之前状态未成功，仅返回PingRequest作为测通
 func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote Candidate) {
 	useCandidate := m.Contains(stun.AttrUseCandidate)
-
+	s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, inbound STUN (BindingRequest, useCandidate flag=%v) from %s to %s -> %+v\n", local.String(), useCandidate, remote.String(), local.String(), m)
 	p := s.agent.findPair(local, remote)
 
 	if p == nil {
@@ -339,7 +341,7 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 
 	if useCandidate {
 		// https://tools.ietf.org/html/rfc8445#section-7.3.1.5
-
+		//之前的ping已经成功收到pong，如果本次再一次收到携带useCandidate的reqiest，则可将该pair作为selecePair
 		if p.state == CandidatePairStateSucceeded {
 			// If the state of this pair is Succeeded, it means that the check
 			// previously sent by this pair produced a successful response and
@@ -349,6 +351,7 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 			if selectedPair := s.agent.getSelectedPair(); selectedPair == nil {
 				s.agent.setSelectedPair(p)
 			}
+			s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, recv stun.Message useCandidate=true, state=CandidatePairStateSucceeded, use [%+v]~[%+v] as selected pair\n", local.Address(), local, remote)
 			//回复一个BindingSuccessResponse
 			s.agent.sendBindingSuccess(m, local, remote)
 		} else {
@@ -360,10 +363,12 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 			// MUST remove the candidate pair from the valid list, set the
 			// candidate pair state to Failed, and set the checklist state to
 			// Failed.
+			s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, recv stun.Message useCandidate=true, but state != CandidatePairStateSucceeded, continue ping\n", local.Address())
 			//之前Pair状态未成功，仅返回PingRequest
 			s.PingCandidate(local, remote)
 		}
 	} else {
+		s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, recv stun.Message useCandidate=false, just response ping\n", local.Address())
 		//如果不是提名操作，同时返回BindingSuccess和Ping
 		s.agent.sendBindingSuccess(m, local, remote)
 		s.PingCandidate(local, remote)

@@ -681,10 +681,10 @@ func (a *Agent) setSelectedPair(p *candidatePair) {
 }
 
 func (a *Agent) pingAllCandidates() {
-	a.log.Trace("pinging all candidates")
+	a.log.Debugf("pingAllCandidates: pinging all candidates")
 
 	if len(a.checklist) == 0 {
-		a.log.Warn("pingAllCandidates called with no candidate pairs. Connection is not possible yet.")
+		a.log.Warn("pingAllCandidates: pingAllCandidates called with no candidate pairs. Connection is not possible yet.")
 	}
 
 	for _, p := range a.checklist {
@@ -695,7 +695,7 @@ func (a *Agent) pingAllCandidates() {
 		}
 
 		if p.bindingRequestCount > a.maxBindingRequests {
-			a.log.Tracef("max requests reached for pair %s, marking it as failed\n", p)
+			a.log.Debugf("pingAllCandidates: max requests reached for pair %s, marking it as failed\n", p)
 			p.state = CandidatePairStateFailed
 		} else {
 			a.selector.PingCandidate(p.local, p.remote)
@@ -782,6 +782,7 @@ func (a *Agent) checkKeepalive() {
 		(time.Since(selectedPair.local.LastSent()) > a.keepaliveInterval) {
 		// we use binding request instead of indication to support refresh consent schemas
 		// see https://tools.ietf.org/html/rfc7675
+		a.log.Debugf("checkKeepalive: keep alive for selected pair\n")
 		a.selector.PingCandidate(selectedPair.local, selectedPair.remote)
 	}
 }
@@ -791,6 +792,7 @@ func (a *Agent) AddRemoteCandidate(c Candidate) error {
 	// If we have a mDNS Candidate lets fully resolve it before adding it locally
 	//如果是Host Candidate，由于其可能以域名的方式出现，所以特殊处理，通过解析DNS后获取真实IP后处理
 	if c.Type() == CandidateTypeHost && strings.HasSuffix(c.Address(), ".local") {
+		a.log.Debugf("AddRemoteCandidate: candidate type is host && has suffix .local\n")
 		if a.mDNSMode == MulticastDNSModeDisabled {
 			a.log.Warnf("remote mDNS candidate added, but mDNS is disabled: (%s)", c.Address())
 			return nil
@@ -807,6 +809,7 @@ func (a *Agent) AddRemoteCandidate(c Candidate) error {
 
 	go func() {
 		if err := a.run(func(agent *Agent) {
+			a.log.Debugf("AddRemoteCandidate: addRemoteCandidate %+v\n", c)
 			agent.addRemoteCandidate(c)
 		}); err != nil {
 			a.log.Warnf("Failed to add remote candidate %s: %v", c.Address(), err)
@@ -863,10 +866,10 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 			return
 		}
 	}
-
+	a.log.Debugf("addRemoteCandidate: current candidate [%+v] not exist in set [%+v], add it\n", c, set)
 	set = append(set, c)
 	a.remoteCandidates[c.NetworkType()] = set
-
+	a.log.Debugf("addRemoteCandidate: current candidate [%+v] add pair with local candidate [%+v], add it\n", c, a.localCandidates)
 	if localCandidates, ok := a.localCandidates[c.NetworkType()]; ok {
 		for _, localCandidate := range localCandidates {
 			a.addPair(localCandidate, c)
@@ -1073,6 +1076,7 @@ func (a *Agent) handleInboundBindingSuccess(id [stun.TransactionIDSize]byte) (bo
 func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr) {
 	var err error
 	if m == nil || local == nil {
+		a.log.Debugf("handleInbound: stun.Message=nil OR local candidate=nil\n")
 		return
 	}
 	//检查Method和Class，如果不是指定Method和Class，则为错误STUN消息
@@ -1080,7 +1084,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		!(m.Type.Class == stun.ClassSuccessResponse ||
 			m.Type.Class == stun.ClassRequest ||
 			m.Type.Class == stun.ClassIndication) {
-		a.log.Tracef("unhandled STUN from %s to %s class(%s) method(%s)", remote, local, m.Type.Class, m.Type.Method)
+		a.log.Debugf("handleInbound: conn=%s, unhandled STUN from %s to %s class(%s) method(%s)", local.Address(), remote, local, m.Type.Class, m.Type.Method)
 		return
 	}
 	//总体意思就是忽略与自身类型一致的数据包
@@ -1089,16 +1093,16 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		//1、忽略Controlling类型数据包(Controlling角色只接收Controlled数据包)
 		//2、忽略包含UseCandidate属性的(只有Controlling模式才会携带UseCandidate属性)
 		if m.Contains(stun.AttrICEControlling) {
-			a.log.Debug("inbound isControlling && a.isControlling == true")
+			a.log.Debugf("handleInbound: conn=%s, inbound isControlling && a.isControlling == true, return", local.Address())
 			return
 		} else if m.Contains(stun.AttrUseCandidate) {
-			a.log.Debug("useCandidate && a.isControlling == true")
+			a.log.Debugf("handleInbound: conn=%s, useCandidate && a.isControlling == true, return", local.Address())
 			return
 		}
 	} else {
 		//如果是Controlled模式，忽略Controlled类型数据包
 		if m.Contains(stun.AttrICEControlled) {
-			a.log.Debug("inbound isControlled && a.isControlling == false")
+			a.log.Debugf("handleInbound: conn=%s, inbound isControlled && a.isControlling == false, return", local.Address())
 			return
 		}
 	}
@@ -1107,14 +1111,15 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 	//如果是Response，调用HandleSuccessResponse函数
 	if m.Type.Class == stun.ClassSuccessResponse {
 		if err = assertInboundMessageIntegrity(m, []byte(a.remotePwd)); err != nil {
-			a.log.Warnf("discard message from (%s), %v", remote, err)
+			a.log.Warnf("handleInbound: discard message from (%s), %v", remote, err)
 			return
 		}
 
 		if remoteCandidate == nil {
-			a.log.Warnf("discard success message from (%s), no such remote", remote)
+			a.log.Warnf("handleInbound: discard success message from (%s), no such remote", remote)
 			return
 		}
+		a.log.Debugf("handleInbound: conn=%s, inbound STUN (ClassSuccessResponse) from %s to %s", local.Address(), remote.String(), local.String())
 		//核心函数!!!
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
@@ -1151,11 +1156,11 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 			}
 			remoteCandidate = prflxCandidate
 
-			a.log.Debugf("adding a new peer-reflexive candidate: %s ", remote)
+			a.log.Debugf("handleInbound: adding a new peer-reflexive candidate: %s ", remote)
 			a.addRemoteCandidate(remoteCandidate)
 		}
 
-		a.log.Tracef("inbound STUN (Request) from %s to %s", remote.String(), local.String())
+		a.log.Debugf("handleInbound: conn=%s, inbound STUN (Request) from %s to %s", local.Address(), remote.String(), local.String())
 		//核心函数!!!
 		a.selector.HandleBindingRequest(m, local, remoteCandidate)
 	}

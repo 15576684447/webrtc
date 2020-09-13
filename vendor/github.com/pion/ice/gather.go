@@ -135,7 +135,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				   3.如果解析出IP地址，则替换该mDNS域名对应的主机名，然后继续按照[ RFC8445 ]中定义的方法处理candidate。
 				   4.否则，忽略该candidate。
 				*/
-				a.log.Debugf("gatherCandidates -> gatherCandidatesLocal\n")
+				a.log.Debugf("*******gatherCandidates -> gatherCandidatesLocal*******\n")
 				a.gatherCandidatesLocal(a.networkTypes)
 			case CandidateTypeServerReflexive:
 				//通过指定STUN服务器地址来获取外部IP
@@ -150,11 +150,11 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				并将Binding respons返回给STUN客户端。当包通过NAT返回时，NAT将修改IP报头中的dest addr，
 				但STUN body中的XOR-MAPPED-address属性将保持不变。如此客户端就可以获取到自身网络的外网NAT映射结果了。
 				*/
-				a.log.Debugf("gatherCandidates -> gatherCandidatesSrflx\n")
+				a.log.Debugf("*******gatherCandidates -> gatherCandidatesSrflx*******\n")
 				a.gatherCandidatesSrflx(a.urls, a.networkTypes)
 				//如果指定IPMapper
 				if a.extIPMapper != nil && a.extIPMapper.candidateType == CandidateTypeServerReflexive {
-					a.log.Debugf("gatherCandidates -> gatherCandidatesSrflxMapped\n")
+					a.log.Debugf("*******gatherCandidates -> gatherCandidatesSrflxMapped*******\n")
 					a.gatherCandidatesSrflxMapped(a.networkTypes)
 				}
 			case CandidateTypeRelay:
@@ -177,7 +177,7 @@ func (a *Agent) gatherCandidates() <-chan struct{} {
 				Send and Data机制：客户端发送给relay服务端的数据中包含（a）一个XOR-PEER-ADDRESS属性，该属性指定对端的传输地址(NAT映射地址)，以及（b）一个包含数据的data属性
 				channels机制：使用ChannelData的备用数据包格式。该格式有一个4字节的头，其中包含一个称为channel number的数字。每个通道号都绑定到特定的对端，因此用作对端主机传输地址的简写
 				*/
-				a.log.Debugf("gatherCandidates -> gatherCandidatesRelay\n")
+				a.log.Debugf("*******gatherCandidates -> gatherCandidatesRelay*******\n")
 				if err := a.gatherCandidatesRelay(a.urls); err != nil {
 					a.log.Errorf("Failed to gather relay candidates: %v\n", err)
 				}

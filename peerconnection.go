@@ -123,10 +123,12 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 		return nil, err
 	}
 	pc.log.Debugf("NewPeerConnection: after config: %+#v\n", pc)
+	pc.log.Debugf("NewPeerConnection: start createICEGatherer\n")
 	pc.iceGatherer, err = pc.createICEGatherer()
 	if err != nil {
 		return nil, err
 	}
+	pc.log.Debugf("NewPeerConnection: end createICEGatherer\n")
 	pc.log.Debugf("NewPeerConnection: ICETrickle=%v\n", pc.api.settingEngine.candidates.ICETrickle)
 	if !pc.api.settingEngine.candidates.ICETrickle {
 		pc.log.Debugf("NewPeerConnection: pc.iceGatherer.Gather()\n")
@@ -134,18 +136,18 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 			return nil, err
 		}
 	}
-
+	pc.log.Debugf("NewPeerConnection: createICETransport\n")
 	// Create the ice transport
 	iceTransport := pc.createICETransport()
 	pc.iceTransport = iceTransport
-
+	pc.log.Debugf("NewPeerConnection: NewDTLSTransport\n")
 	// Create the DTLS transport
 	dtlsTransport, err := pc.api.NewDTLSTransport(pc.iceTransport, pc.configuration.Certificates)
 	if err != nil {
 		return nil, err
 	}
 	pc.dtlsTransport = dtlsTransport
-
+	pc.log.Debugf("NewPeerConnection: NewSCTPTransport\n")
 	// Create the SCTP transport
 	pc.sctpTransport = pc.api.NewSCTPTransport(pc.dtlsTransport)
 
@@ -795,6 +797,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if err := desc.parsed.Unmarshal([]byte(desc.SDP)); err != nil {
 		return err
 	}
+	pc.log.Debugf("SetRemoteDescription: setDescription state\n")
 	//根据当前状态和将要执行的动作，决定下一个状态是否为stable，从而决定该session description是存储到pending(Remote/Local)Description还是正式current(Remote/Local)Description
 	if err := pc.setDescription(&desc, stateChangeOpSetRemote); err != nil {
 		return err
@@ -888,7 +891,9 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if err != nil {
 		return err
 	}
+	pc.log.Debugf("SetRemoteDescription: extract fingerprint=%s && (Ufrag=%s, Pwd=%s) from remote sdp\n", fingerprint, remoteUfrag, remotePwd)
 	//遍历remoteSDP中的candidates,将remoteCandidate与同网络类型的LocalCandidate组成pair，进行连通性测试
+	pc.log.Debugf("SetRemoteDescription: AddRemoteCandidate for candidates -> %+v\n", candidates)
 	for _, c := range candidates {
 		if err = pc.iceTransport.AddRemoteCandidate(c); err != nil {
 			return err
@@ -907,6 +912,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 
 	// Start the networking in a new routine since it will block until
 	// the connection is actually established.
+	pc.log.Debugf("SetRemoteDescription: startTransports\n")
 	pc.ops.Enqueue(func() {
 		//进行连通性测试，需要重点阅读解析!!!
 		pc.startTransports(iceRole, dtlsRoleFromRemoteSDP(desc.parsed), remoteUfrag, remotePwd, fingerprint, fingerprintHash)
@@ -1751,6 +1757,7 @@ func (pc *PeerConnection) GetStats() StatsReport {
 func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, remoteUfrag, remotePwd, fingerprint, fingerprintHash string) {
 	// Start the ice transport
 	//开始ICE建连,主要逻辑在agent中
+	pc.log.Debugf("startTransports: pc.iceTransport.Start\n")
 	err := pc.iceTransport.Start(
 		pc.iceGatherer,
 		ICEParameters{
@@ -1773,6 +1780,7 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 		3、RTP数据包使用对称加密密钥加密成SRTP后，通过ICE发送给对端，对端解密为RTP
 		4、获取对端的SRTP，使用对称加密密钥解密为RTP数据包
 	 */
+	pc.log.Debugf("startTransports: pc.dtlsTransport.Start\n")
 	err = pc.dtlsTransport.Start(DTLSParameters{
 		Role:         dtlsRole,
 		Fingerprints: []DTLSFingerprint{{Algorithm: fingerprintHash, Value: fingerprint}},

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 	"webrtc/webrtc/internal/mux"
+	"webrtc/webrtc/ion-sfu/pkg/log"
 
 	"github.com/pion/ice"
 	"github.com/pion/logging"
@@ -103,7 +104,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 		t.lock.Lock()
 		t.state = state
 		t.lock.Unlock()
-
+		t.log.Debugf("ICETransport Start: agent.OnConnectionStateChange: %s\n", state.String())
 		t.onConnectionStateChange(state)
 	}); err != nil {
 		return err
@@ -114,6 +115,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 			t.log.Warnf("Unable to convert ICE candidates to ICECandidates: %s", err)
 			return
 		}
+		t.log.Debugf("ICETransport Start: agent.OnSelectedCandidatePairChange: %+v\n", candidates)
 		t.onSelectedCandidatePairChange(NewICECandidatePair(&candidates[0], &candidates[1]))
 	}); err != nil {
 		return err
@@ -124,7 +126,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 		role = &controlled
 	}
 	t.role = *role
-
+	t.log.Debugf("ICETransport Start: role: %s\n", role.String())
 	// Drop the lock here to allow trickle-ICE candidates to be
 	// added so that the agent can complete a connection
 	t.lock.Unlock()
@@ -137,11 +139,13 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	//重点函数入口!!!
 	switch *role {
 	case ICERoleControlling:
+		t.log.Debugf("ICETransport Start: role=ICERoleControlling, agent.Dial called\n")
 		iceConn, err = agent.Dial(context.TODO(),
 			params.UsernameFragment,
 			params.Password)
 
 	case ICERoleControlled:
+		t.log.Debugf("ICETransport Start: role=ICERoleControlled, agent.Accept called\n")
 		iceConn, err = agent.Accept(context.TODO(),
 			params.UsernameFragment,
 			params.Password)
@@ -267,6 +271,7 @@ func (t *ICETransport) AddRemoteCandidate(remoteCandidate ICECandidate) error {
 	}
 	//根据网络类型存储remoteCandidate到agent模块，如果已经存在，则跳过
 	//将该remoteCandidate与其类型相同的localCandidate组成新的pair对，加入到后续的连通性测试
+	log.Logger.Debugf("AddRemoteCandidate: agent.AddRemoteCandidate %+v\n", c)
 	err = agent.AddRemoteCandidate(c)
 	if err != nil {
 		return err

@@ -78,9 +78,17 @@ func (s *server) publish(payload *pb.PublishRequest_Connect) (*transport.WebRTCT
 		return nil, nil, errSdpParseFailed
 	}
 	log.Logger.Debugf("publish get offer->Attributes %+v\n", offer.Attributes)
-	log.Logger.Debugf("publish get offer->MediaDescriptions\n")
+	log.Logger.Debugf("publish get offer->MediaDescriptions==========>\n")
 	for index, md := range offer.MediaDescriptions {
-		log.Logger.Debugf("[%d]: %+v\n", index, md)
+		log.Logger.Debugf("[%d]: MediaName => %+v\n", index, md.MediaName)
+		log.Logger.Debugf("[%d]: MediaTitle => %+v\n", index, md.MediaTitle)
+		log.Logger.Debugf("[%d]: ConnectionInformation => %+v\n", index, md.ConnectionInformation)
+		log.Logger.Debugf("[%d]: Bandwidth => %+v\n", index, md.Bandwidth)
+		log.Logger.Debugf("[%d]: EncryptionKey => %+v\n", index, md.EncryptionKey)
+		log.Logger.Debugf("[%d]: Attributes ==========>\n", index)
+		for i, attri := range md.Attributes {
+			log.Logger.Debugf("[%d][%d]: Attributes => %+v\n", index, i, attri)
+		}
 	}
 
 	rtcOptions := transport.RTCOptions{
@@ -95,11 +103,12 @@ func (s *server) publish(payload *pb.PublishRequest_Connect) (*transport.WebRTCT
 	}
 
 	rtcOptions.Codecs = codecs
+	log.Logger.Debugf("publish -> transport.NewWebRTCTransport\n")
 	pub := transport.NewWebRTCTransport(mid, rtcOptions)
 	if pub == nil {
 		return nil, nil, errWebRTCTransportInitFailed
 	}
-
+	log.Logger.Debugf("publish -> rtc.AddRouter\n")
 	router := rtc.AddRouter(mid)
 
 	answer, err := pub.Answer(webrtc.SessionDescription{

@@ -12,3 +12,7 @@ type SessionDescription struct {
 	// This will never be initialized by callers, internal use only
 	parsed *sdp.SessionDescription
 }
+
+func (s *SessionDescription) GetSdp() *sdp.SessionDescription {
+	return s.parsed
+}

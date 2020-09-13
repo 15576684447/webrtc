@@ -187,18 +187,19 @@ func NewWebRTCTransport(id string, options RTCOptions) *WebRTCTransport {
 	w.init(options)
 
 	var err error
+	log.Logger.Debugf("NewWebRTCTransport: NewPeerConnection\n")
 	w.pc, err = w.api.NewPeerConnection(cfg)
 	if err != nil {
 		log.Logger.Errorf("NewWebRTCTransport api.NewPeerConnection %v", err)
 		return nil
 	}
-
+	log.Logger.Debugf("NewWebRTCTransport: AddTransceiver Video, receive only\n")
 	_, err = w.pc.AddTransceiver(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
 	if err != nil {
 		log.Logger.Errorf("w.pc.AddTransceiver video %v", err)
 		return nil
 	}
-
+	log.Logger.Debugf("NewWebRTCTransport: AddTransceiver Audio, receive only\n")
 	_, err = w.pc.AddTransceiver(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
 	if err != nil {
 		log.Logger.Errorf("w.pc.AddTransceiver audio %v", err)
@@ -320,6 +321,7 @@ func (w *WebRTCTransport) Answer(offer webrtc.SessionDescription, options RTCOpt
 		//以track为单位接收track数据，并发送到rtpChan
 		//pub的track信息记录在inTracks中
 		w.pc.OnTrack(func(remoteTrack *webrtc.Track, receiver *webrtc.RTPReceiver) {
+			log.Logger.Debugf("Answer: Pub OnTrack: %+v\n", remoteTrack)
 			w.inTrackLock.Lock()
 			w.inTracks[remoteTrack.SSRC()] = remoteTrack
 			w.inTrackLock.Unlock()
@@ -338,6 +340,7 @@ func (w *WebRTCTransport) Answer(offer webrtc.SessionDescription, options RTCOpt
 		for ssrc, pt := range ssrcPTMap {
 			if _, found := w.outTracks[ssrc]; !found {
 				track, _ := w.pc.NewTrack(pt, ssrc, "pion", "pion")
+				log.Logger.Debugf("Answer: Sub add new track -> %+v\n", track)
 				if track != nil {
 					_, err := w.pc.AddTrack(track)
 					if err == nil {
@@ -354,12 +357,12 @@ func (w *WebRTCTransport) Answer(offer webrtc.SessionDescription, options RTCOpt
 		w.receiveOutTracksRTCP()
 	}
 
+	//TODO:开始正式连接
 	err := w.pc.SetRemoteDescription(offer)
 	if err != nil {
 		log.Logger.Errorf("pc.SetRemoteDescription %v", err)
 		return webrtc.SessionDescription{}, err
 	}
-
 	answer, err := w.pc.CreateAnswer(nil)
 	if err != nil {
 		log.Logger.Errorf("pc.CreateAnswer answer=%v err=%v", answer, err)
