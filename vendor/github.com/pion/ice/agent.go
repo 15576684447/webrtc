@@ -402,6 +402,7 @@ func NewAgent(config *AgentConfig) (*Agent, error) {
 		insecureSkipVerify: config.InsecureSkipVerify,
 	}
 	a.haveStarted.Store(false)
+	a.log.Debugf("NewAgent: Agent -> %+v\n", a)
 
 	if a.net == nil {
 		a.net = vnet.NewNet(nil)
@@ -1123,6 +1124,8 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 		//核心函数!!!
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
+		a.log.Debugf("handleInbound stun.ClassRequest: localUfrag=%s, remoteUfrag=%s\n", a.localUfrag, a.remoteUfrag)
+		a.log.Debugf("handleInbound stun.ClassRequest: localUfrag:remoteUfrag=%s\n", a.localUfrag+":"+a.remoteUfrag)
 		//如果是Request，调用HandleBindingRequest函数
 		if err = assertInboundUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
 			a.log.Warnf("discard message from (%s), %v", remote, err)

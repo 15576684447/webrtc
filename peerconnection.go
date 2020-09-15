@@ -909,7 +909,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if (weOffer && remoteIsLite == pc.api.settingEngine.candidates.ICELite) || (remoteIsLite && !pc.api.settingEngine.candidates.ICELite) {
 		iceRole = ICERoleControlling
 	}
-
+	pc.log.Debugf("*************************SetRemoteDescription: weOffer=%v, remoteIsLite=%v, pc.api.settingEngine.candidates.ICELite=%v, iceRole=%s\n", weOffer, remoteIsLite, pc.api.settingEngine.candidates.ICELite, iceRole.String() )
 	// Start the networking in a new routine since it will block until
 	// the connection is actually established.
 	pc.log.Debugf("SetRemoteDescription: startTransports\n")

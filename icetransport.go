@@ -5,14 +5,12 @@ package webrtc
 import (
 	"context"
 	"errors"
+	"github.com/pion/ice"
+	"github.com/pion/logging"
 	"sync"
 	"sync/atomic"
 	"time"
 	"webrtc/webrtc/internal/mux"
-	"webrtc/webrtc/ion-sfu/pkg/log"
-
-	"github.com/pion/ice"
-	"github.com/pion/logging"
 )
 
 // ICETransport allows an application access to information about the ICE
@@ -271,7 +269,7 @@ func (t *ICETransport) AddRemoteCandidate(remoteCandidate ICECandidate) error {
 	}
 	//根据网络类型存储remoteCandidate到agent模块，如果已经存在，则跳过
 	//将该remoteCandidate与其类型相同的localCandidate组成新的pair对，加入到后续的连通性测试
-	log.Logger.Debugf("AddRemoteCandidate: agent.AddRemoteCandidate %+v\n", c)
+	//log.Logger.Debugf("AddRemoteCandidate: agent.AddRemoteCandidate %+v\n", c)
 	err = agent.AddRemoteCandidate(c)
 	if err != nil {
 		return err

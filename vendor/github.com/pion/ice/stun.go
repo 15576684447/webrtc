@@ -16,7 +16,7 @@ func assertInboundUsername(m *stun.Message, expectedUsername string) error {
 		return err
 	}
 	if string(username) != expectedUsername {
-		return fmt.Errorf("username mismatch expected(%x) actual(%x)", expectedUsername, string(username))
+		return fmt.Errorf("username mismatch expected(%s) actual(%s)", expectedUsername, string(username))
 	}
 
 	return nil

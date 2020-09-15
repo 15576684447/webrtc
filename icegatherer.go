@@ -126,6 +126,7 @@ func (g *ICEGatherer) createAgent() error {
 	//代理用于搜集candidate!!!
 	agent, err := ice.NewAgent(config)
 	if err != nil {
+		g.log.Debugf("createAgent: NewAgent fail: %v\n", err)
 		return err
 	}
 
