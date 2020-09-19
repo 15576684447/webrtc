@@ -77,14 +77,15 @@ func (s *controllingSelector) ContactCandidates() {
 	switch {
 	//如果已经有selectPair(最终用于通信的)，则进行心跳保活;如果没有selectPair才会运行之后的case
 	case s.agent.getSelectedPair() != nil:
-		//对selectPair进行心跳保活
+		//对selectPair进行心跳保活,检查selectedPair心跳是否超时(当前时间-上次接收时间>超时时间)，超时就移除该selectedPair
 		if s.agent.validateSelectedPair() {
 			s.log.Debug("controllingSelector ContactCandidates: checking keepalive")
+			//如果到达心跳发送周期(当前时间-上次发送时间>心跳周期)，发送心跳
 			s.agent.checkKeepalive()
 		}
 	//如果上一步没有selectPair，但是有待提名的pair，则进行提名操作；没有提名操作才会运行之后的case
 	case s.nominatedPair != nil:
-		//在nominatePair上持续的发送Binding request，直至达到上限或者一致有效
+		//在nominatePair上持续的发送Binding request，直至达到上限(如果提名成功的selectedPair能一直保活成功，就不会持续提名)
 		if s.nominationRequestCount > s.agent.maxBindingRequests {
 			s.log.Debug("controllingSelector ContactCandidates: max nomination requests reached, setting the connection state to failed")
 			s.agent.updateConnectionState(ConnectionStateFailed)
@@ -96,13 +97,13 @@ func (s *controllingSelector) ContactCandidates() {
 		s.nominatePair(s.nominatedPair)
 	//如果没有selectPair，也没待提名的Pair，则从checklist中选择一个优先级最高的进行提名操作；与此同时ping checklist中所有pair
 	default:
-		//对checklist进行连通性，此处会对checklist进行优先级排序，选择优先级最高的进行提名
+		//如果也没有正在提名的，对state=CandidatePairStateSucceeded的checklist进行优先级排序，选取bestPair进行提名
 		p := s.agent.getBestValidCandidatePair()
 		if p != nil && s.isNominatable(p.local) && s.isNominatable(p.remote) {
 			s.log.Debugf("controllingSelector ContactCandidates: Nominatable pair found, nominating (%s, %s)", p.local.String(), p.remote.String())
 			p.nominated = true
 			s.nominatedPair = p
-			//提名其实就是发送Binding request的过程
+			//提名其实就是发送Binding request(携带useCandidate)的过程
 			s.nominatePair(p)
 			return
 		}
@@ -191,6 +192,7 @@ func (s *controllingSelector) HandleBindingRequest(m *stun.Message, local, remot
 //如果是，查看pendingRequest是否为UseCandidate(提名的标志)
 //如果是，说明提名成功，将当前Pair设置为Selected Pair
 func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remote Candidate, remoteAddr net.Addr) {
+	//查看response的ping是否在PendingBindingRequests队列中，否则是无效的response
 	ok, pendingRequest := s.agent.handleInboundBindingSuccess(m.TransactionID)
 	if !ok {
 		s.log.Warnf("discard message from (%s), unknown TransactionID 0x%x", remote, m.TransactionID)
@@ -283,7 +285,6 @@ func (s *controlledSelector) PingCandidate(local, remote Candidate) {
 		s.log.Error(err.Error())
 		return
 	}
-
 	s.agent.sendBindingRequest(msg, local, remote)
 }
 
@@ -296,7 +297,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 	// controlling agent, the controlled agent MUST reject the nomination
 	// request with an appropriate error code response (e.g., 400)
 	// [RFC5389].
-
+	//查看response的ping是否在PendingBindingRequests队列中，否则为无效的response
 	ok, pendingRequest := s.agent.handleInboundBindingSuccess(m.TransactionID)
 	if !ok {
 		s.log.Warnf("discard message from (%s), unknown TransactionID 0x%x", remote, m.TransactionID)

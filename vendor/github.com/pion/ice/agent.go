@@ -720,7 +720,7 @@ func (a *Agent) getBestAvailableCandidatePair() *candidatePair {
 	}
 	return best
 }
-
+//只检查state=CandidatePairStateSucceeded的pair，统计其优先级，获取Priority最小的那个作为bestPair
 func (a *Agent) getBestValidCandidatePair() *candidatePair {
 	var best *candidatePair
 	for _, p := range a.checklist {
@@ -1005,8 +1005,9 @@ func (a *Agent) findRemoteCandidate(networkType NetworkType, addr net.Addr) Cand
 
 func (a *Agent) sendBindingRequest(m *stun.Message, local, remote Candidate) {
 	a.log.Tracef("ping STUN from %s to %s\n", local.String(), remote.String())
-
+	//清除PendingBindingRequests队列中超时未收到回复的ping
 	a.invalidatePendingBindingRequests(time.Now())
+	//将当前ping加入到PendingBindingRequests队列中，等待回复
 	a.pendingBindingRequests = append(a.pendingBindingRequests, bindingRequest{
 		timestamp:      time.Now(),
 		transactionID:  m.TransactionID,
