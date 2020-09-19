@@ -1,4 +1,4 @@
-package ice
+package ice_support_remonination
 
 // EventCallback callback function
 type EventCallback func(e Event)

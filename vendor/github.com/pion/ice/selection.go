@@ -231,6 +231,7 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 func (s *controllingSelector) PingCandidate(local, remote Candidate) {
 	msg, err := stun.Build(stun.BindingRequest, stun.TransactionID,
 		stun.NewUsername(s.agent.remoteUfrag+":"+s.agent.localUfrag),
+		UseCandidate,//激进方式ice，controlling端每次ping都携带useCandidate属性
 		AttrControlling(s.agent.tieBreaker),
 		PriorityAttr(local.Priority()),
 		stun.NewShortTermIntegrity(s.agent.remotePwd),
@@ -323,6 +324,11 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 	}
 
 	p.state = CandidatePairStateSucceeded
+	//激进式ice在收到controlling端的ping包后，如果自己没ping通，会先设置该pair的nominated为true，当自己ping返回pong时即设置为selectedPair
+	if p.nominated && s.agent.getSelectedPair() == nil {
+		s.log.Infof("controlled agent set selected pair: %v", p)
+		s.agent.setSelectedPair(p)
+	}
 	s.log.Debugf("controlledSelector HandleSuccessResponse: Found valid candidate pair: %s", p)
 }
 
@@ -367,6 +373,8 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 			s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, recv stun.Message useCandidate=true, but state != CandidatePairStateSucceeded, continue ping\n", local.Address())
 			//之前Pair状态未成功，仅返回PingRequest
 			s.PingCandidate(local, remote)
+			//如果之前没成功，但是收到携带useCandidate属性的包，则先设置nominated = true
+			p.nominated = true
 		}
 	} else {
 		s.log.Debugf("controlledSelector HandleBindingRequest: conn %s, recv stun.Message useCandidate=false, just response ping\n", local.Address())

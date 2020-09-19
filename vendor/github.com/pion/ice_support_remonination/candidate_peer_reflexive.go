@@ -1,6 +1,6 @@
 // Package ice ...
 //nolint:dupl
-package ice
+package ice_support_remonination
 
 import "net"
 

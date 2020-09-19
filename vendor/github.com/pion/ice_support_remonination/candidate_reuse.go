@@ -1,6 +1,6 @@
 // +build linux darwin freebsd netbsd openbsd
 
-package ice
+package ice_support_remonination
 
 import (
 	"context"

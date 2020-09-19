@@ -1,4 +1,4 @@
-package ice
+package ice_support_remonination
 
 // CandidateType represents the type of candidate
 type CandidateType byte
