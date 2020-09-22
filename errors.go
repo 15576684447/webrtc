@@ -84,6 +84,9 @@ var (
 	// generate SDP Answers with different SDP Semantics than the received Offer
 	ErrIncorrectSDPSemantics = errors.New("offer SDP semantics does not match configuration")
 
+	// ErrIncorrectSignalingState indicates that the signaling state of PeerConnection is not correct
+	ErrIncorrectSignalingState = errors.New("operation can not be run in current signaling state")
+
 	// ErrProtocolTooLarge indicates that value given for a DataChannelInit protocol is
 	//longer then 65535 bytes
 	ErrProtocolTooLarge = errors.New("protocol is larger then 65535 bytes")
@@ -111,4 +114,15 @@ var (
 	// ErrSessionDescriptionMissingIcePwd indicates SetRemoteDescription was called with a SessionDescription that
 	// is missing an ice-pwd value
 	ErrSessionDescriptionMissingIcePwd = errors.New("SetRemoteDescription called with no ice-pwd")
+
+	// ErrSessionDescriptionConflictingIceUfrag  indicates SetRemoteDescription was called with a SessionDescription that
+	// contains multiple conflicting ice-ufrag values
+	ErrSessionDescriptionConflictingIceUfrag = errors.New("SetRemoteDescription called with multiple conflicting ice-ufrag values")
+
+	// ErrSessionDescriptionConflictingIcePwd indicates SetRemoteDescription was called with a SessionDescription that
+	// contains multiple conflicting ice-pwd values
+	ErrSessionDescriptionConflictingIcePwd = errors.New("SetRemoteDescription called with multiple conflicting ice-pwd values")
+
+	// ErrNoSRTPProtectionProfile indicates that the DTLS handshake completed and no SRTP Protection Profile was chosen
+	ErrNoSRTPProtectionProfile = errors.New("DTLS Handshake completed and no SRTP Protection Profile was chosen")
 )

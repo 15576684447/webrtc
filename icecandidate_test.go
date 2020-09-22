@@ -3,7 +3,7 @@ package webrtc
 import (
 	"testing"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,31 +90,37 @@ func TestICECandidate_Convert(t *testing.T) {
 		switch testCase.expectedType {
 		case ice.CandidateTypeHost:
 			config := ice.CandidateHostConfig{
-				Network:   testCase.expectedNetwork,
-				Address:   testCase.expectedAddress,
-				Port:      testCase.expectedPort,
-				Component: testCase.expectedComponent,
+				Network:    testCase.expectedNetwork,
+				Address:    testCase.expectedAddress,
+				Port:       testCase.expectedPort,
+				Component:  testCase.expectedComponent,
+				Foundation: "foundation",
+				Priority:   128,
 			}
 			expectedICE, err = ice.NewCandidateHost(&config)
 		case ice.CandidateTypeServerReflexive:
 			config := ice.CandidateServerReflexiveConfig{
-				Network:   testCase.expectedNetwork,
-				Address:   testCase.expectedAddress,
-				Port:      testCase.expectedPort,
-				Component: testCase.expectedComponent,
-				RelAddr:   testCase.expectedRelatedAddress.Address,
-				RelPort:   testCase.expectedRelatedAddress.Port,
+				Network:    testCase.expectedNetwork,
+				Address:    testCase.expectedAddress,
+				Port:       testCase.expectedPort,
+				Component:  testCase.expectedComponent,
+				Foundation: "foundation",
+				Priority:   128,
+				RelAddr:    testCase.expectedRelatedAddress.Address,
+				RelPort:    testCase.expectedRelatedAddress.Port,
 			}
 			expectedICE, err = ice.NewCandidateServerReflexive(&config)
 			assert.NoError(t, err)
 		case ice.CandidateTypePeerReflexive:
 			config := ice.CandidatePeerReflexiveConfig{
-				Network:   testCase.expectedNetwork,
-				Address:   testCase.expectedAddress,
-				Port:      testCase.expectedPort,
-				Component: testCase.expectedComponent,
-				RelAddr:   testCase.expectedRelatedAddress.Address,
-				RelPort:   testCase.expectedRelatedAddress.Port,
+				Network:    testCase.expectedNetwork,
+				Address:    testCase.expectedAddress,
+				Port:       testCase.expectedPort,
+				Component:  testCase.expectedComponent,
+				Foundation: "foundation",
+				Priority:   128,
+				RelAddr:    testCase.expectedRelatedAddress.Address,
+				RelPort:    testCase.expectedRelatedAddress.Port,
 			}
 			expectedICE, err = ice.NewCandidatePeerReflexive(&config)
 		}

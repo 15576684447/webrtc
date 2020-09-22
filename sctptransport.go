@@ -12,7 +12,7 @@ import (
 	"github.com/pion/datachannel"
 	"github.com/pion/logging"
 	"github.com/pion/sctp"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
+	"github.com/pion/webrtc/v3/pkg/rtcerr"
 )
 
 const sctpMaxChannels = uint16(65535)
@@ -25,6 +25,10 @@ type SCTPTransport struct {
 
 	// State represents the current state of the SCTP transport.
 	state SCTPTransportState
+
+	// SCTPTransportState doesn't have an enum to distinguish between New/Connecting
+	// so we need a dedicated field
+	isStarted bool
 
 	// MaxMessageSize represents the maximum size of data that can be passed to
 	// DataChannel's send() method.
@@ -88,6 +92,11 @@ func (r *SCTPTransport) GetCapabilities() SCTPCapabilities {
 // create an SCTPTransport, SCTP SO (Simultaneous Open) is used to establish
 // a connection over SCTP.
 func (r *SCTPTransport) Start(remoteCaps SCTPCapabilities) error {
+	if r.isStarted {
+		return nil
+	}
+	r.isStarted = true
+
 	if err := r.ensureDTLS(); err != nil {
 		return err
 	}
@@ -198,11 +207,11 @@ func (r *SCTPTransport) acceptDataChannels(a *sctp.Association) {
 
 		r.lock.Lock()
 		r.dataChannelsOpened++
-		dcOpenedHdlr := r.onDataChannelOpenedHandler
+		handler := r.onDataChannelOpenedHandler
 		r.lock.Unlock()
 
-		if dcOpenedHdlr != nil {
-			dcOpenedHdlr(rtcDC)
+		if handler != nil {
+			handler(rtcDC)
 		}
 	}
 }
@@ -217,11 +226,11 @@ func (r *SCTPTransport) OnError(f func(err error)) {
 
 func (r *SCTPTransport) onError(err error) {
 	r.lock.RLock()
-	hdlr := r.onErrorHandler
+	handler := r.onErrorHandler
 	r.lock.RUnlock()
 
-	if hdlr != nil {
-		go hdlr(err)
+	if handler != nil {
+		go handler(err)
 	}
 }
 
@@ -245,11 +254,11 @@ func (r *SCTPTransport) onDataChannel(dc *DataChannel) (done chan struct{}) {
 	r.lock.Lock()
 	r.dataChannels = append(r.dataChannels, dc)
 	r.dataChannelsAccepted++
-	hdlr := r.onDataChannelHandler
+	handler := r.onDataChannelHandler
 	r.lock.Unlock()
 
 	done = make(chan struct{})
-	if hdlr == nil || dc == nil {
+	if handler == nil || dc == nil {
 		close(done)
 		return
 	}
@@ -257,7 +266,7 @@ func (r *SCTPTransport) onDataChannel(dc *DataChannel) (done chan struct{}) {
 	// Run this synchronously to allow setup done in onDataChannelFn()
 	// to complete before datachannel event handlers might be called.
 	go func() {
-		hdlr(dc)
+		handler(dc)
 		close(done)
 	}()
 

@@ -12,7 +12,7 @@ import (
 
 	"github.com/pion/datachannel"
 	"github.com/pion/logging"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
+	"github.com/pion/webrtc/v3/pkg/rtcerr"
 )
 
 const dataChannelBufferSize = math.MaxUint16 //message size limit for Chromium
@@ -225,12 +225,12 @@ func (d *DataChannel) OnOpen(f func()) {
 
 func (d *DataChannel) onOpen() {
 	d.mu.RLock()
-	hdlr := d.onOpenHandler
+	handler := d.onOpenHandler
 	d.mu.RUnlock()
 
-	if hdlr != nil {
+	if handler != nil {
 		go d.openHandlerOnce.Do(func() {
-			hdlr()
+			handler()
 			d.checkDetachAfterOpen()
 		})
 	}
@@ -246,11 +246,11 @@ func (d *DataChannel) OnClose(f func()) {
 
 func (d *DataChannel) onClose() {
 	d.mu.RLock()
-	hdlr := d.onCloseHandler
+	handler := d.onCloseHandler
 	d.mu.RUnlock()
 
-	if hdlr != nil {
-		go hdlr()
+	if handler != nil {
+		go handler()
 	}
 }
 
@@ -268,20 +268,20 @@ func (d *DataChannel) OnMessage(f func(msg DataChannelMessage)) {
 
 func (d *DataChannel) onMessage(msg DataChannelMessage) {
 	d.mu.RLock()
-	hdlr := d.onMessageHandler
+	handler := d.onMessageHandler
 	d.mu.RUnlock()
 
-	if hdlr == nil {
+	if handler == nil {
 		return
 	}
-	hdlr(msg)
+	handler(msg)
 }
 
 func (d *DataChannel) handleOpen(dc *datachannel.DataChannel) {
-	d.setReadyState(DataChannelStateOpen)
 	d.mu.Lock()
 	d.dataChannel = dc
 	d.mu.Unlock()
+	d.setReadyState(DataChannelStateOpen)
 
 	d.onOpen()
 
@@ -303,11 +303,11 @@ func (d *DataChannel) OnError(f func(err error)) {
 
 func (d *DataChannel) onError(err error) {
 	d.mu.RLock()
-	hdlr := d.onErrorHandler
+	handler := d.onErrorHandler
 	d.mu.RUnlock()
 
-	if hdlr != nil {
-		go hdlr(err)
+	if handler != nil {
+		go handler(err)
 	}
 }
 
@@ -354,7 +354,7 @@ func (d *DataChannel) ensureOpen() error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if d.readyState != DataChannelStateOpen {
-		return &rtcerr.InvalidStateError{Err: ErrDataChannelNotOpen}
+		return io.ErrClosedPipe
 	}
 	return nil
 }

@@ -1,6 +1,12 @@
 /* eslint-env browser */
 
-let pc = new RTCPeerConnection()
+let pc = new RTCPeerConnection({
+  iceServers: [
+    {
+      urls: 'stun:stun.l.google.com:19302'
+    }
+  ]
+})
 let log = msg => {
   document.getElementById('div').innerHTML += msg + '<br>'
 }
@@ -21,8 +27,10 @@ pc.onicecandidate = event => {
   }
 }
 
-// Offer to receive 1 audio, and 2 video tracks
+// Offer to receive 1 audio, and 1 video track
 pc.addTransceiver('video', {'direction': 'sendrecv'})
+pc.addTransceiver('audio', {'direction': 'sendrecv'})
+
 pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log)
 
 window.startSession = () => {

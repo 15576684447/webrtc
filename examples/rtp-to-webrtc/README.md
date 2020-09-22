@@ -6,7 +6,8 @@ With this example we have pre-made GStreamer and ffmpeg pipelines, but you can u
 ## Instructions
 ### Download rtp-to-webrtc
 ```
-go get github.com/pion/webrtc/v2/examples/rtp-to-webrtc
+export GO111MODULE=on
+go get github.com/pion/webrtc/v3/examples/rtp-to-webrtc
 ```
 
 ### Open jsfiddle example page
@@ -29,7 +30,7 @@ On startup you will get a message `Waiting for RTP Packets`, you can use any sof
 
 #### GStreamer
 ```
-gst-launch-1.0 videotestsrc ! 'video/x-raw, width=640, height=480' ! videoconvert ! video/x-raw,format=I420 ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! rtpvp8pay ! udpsink host=127.0.0.1 port=5004
+gst-launch-1.0 videotestsrc ! video/x-raw,width=640,height=480,format=I420 ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! rtpvp8pay ! udpsink host=127.0.0.1 port=5004
 ```
 
 #### ffmpeg

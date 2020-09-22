@@ -9,16 +9,29 @@
   <a href="https://pion.ly"><img src="https://img.shields.io/badge/pion-webrtc-gray.svg?longCache=true&colorB=brightgreen" alt="Pion webrtc"></a>
   <a href="https://sourcegraph.com/github.com/pion/webrtc?badge"><img src="https://sourcegraph.com/github.com/pion/webrtc/-/badge.svg" alt="Sourcegraph Widget"></a>
   <a href="https://pion.ly/slack"><img src="https://img.shields.io/badge/join-us%20on%20slack-gray.svg?longCache=true&logo=slack&colorB=brightgreen" alt="Slack Widget"></a>
+  <a href="https://twitter.com/_pion?ref_src=twsrc%5Etfw"><img src="https://img.shields.io/twitter/url.svg?label=Follow%20%40_pion&style=social&url=https%3A%2F%2Ftwitter.com%2F_pion" alt="Twitter Widget"></a>
   <a href="https://github.com/pion/awesome-pion" alt="Awesome Pion"><img src="https://cdn.rawgit.com/sindresorhus/awesome/d7305f38d29fed78fa85652e3a63e154dd8e8829/media/badge.svg"></a>
   <br>
   <a href="https://travis-ci.org/pion/webrtc"><img src="https://travis-ci.org/pion/webrtc.svg?branch=master" alt="Build Status"></a>
-  <a href="https://pkg.go.dev/github.com/pion/webrtc/v2"><img src="https://godoc.org/github.com/pion/webrtc?status.svg" alt="GoDoc"></a>
+  <a href="https://pkg.go.dev/github.com/pion/webrtc/v3"><img src="https://pkg.go.dev/badge/github.com/pion/webrtc/v3" alt="PkgGoDev"></a>
   <a href="https://codecov.io/gh/pion/webrtc"><img src="https://codecov.io/gh/pion/webrtc/branch/master/graph/badge.svg" alt="Coverage Status"></a>
   <a href="https://goreportcard.com/report/github.com/pion/webrtc"><img src="https://goreportcard.com/badge/github.com/pion/webrtc" alt="Go Report Card"></a>
   <a href="https://www.codacy.com/app/Sean-Der/webrtc"><img src="https://api.codacy.com/project/badge/Grade/18f4aec384894e6aac0b94effe51961d" alt="Codacy Badge"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 <br>
+
+### Breaking Changes
+
+Pion WebRTC v3.0.0 has started! See the [release notes](https://github.com/pion/webrtc/wiki/Release-WebRTC@v3.0.0) to learn about new features and breaking changes.
+
+Until `v3.0.0` has been tagged using `v2` is suggested. Check the [tags](https://github.com/pion/webrtc/tags) for the latest `v2` release.
+
+[Go Modules](https://blog.golang.org/using-go-modules) are mandatory for using Pion WebRTC. So make sure you set `export GO111MODULE=on`, and explicitly specify `/v2` or `/v3` when importing.
+
+We are actively planning and would love your feedback! Please create GitHub issues or join [the Slack channel](https://pion.ly/slack) to follow development and speak with the maintainers.
+
+----
 
 Pion WebRTC is a pure Go implementation of WebRTC. It has zero non-Go dependencies and no 3rd party Go dependencies. It is designed to follow **[WebRTC API](https://w3c.github.io/webrtc-pc/)**, but may deviate when required.
 See [DESIGN.md](DESIGN.md) for the guiding principals/inspirations of the project.
@@ -30,7 +43,7 @@ See [DESIGN.md](DESIGN.md) for the guiding principals/inspirations of the projec
 
 **[awesome-pion](https://github.com/pion/awesome-pion)** contains projects that have used Pion, and serve as real world examples of usage.
 
-**[GoDoc](https://godoc.org/github.com/pion/webrtc)** is an auto generated API reference. All our Public APIs are commented.
+**[GoDoc](https://pkg.go.dev/github.com/pion/webrtc/v3)** is an auto generated API reference. All our Public APIs are commented.
 
 **[FAQ](https://github.com/pion/webrtc/wiki/FAQ)** has answers to common questions. If you have a question not covered please ask in [Slack](https://pion.ly/slack) we are always looking to expand it.
 
@@ -40,6 +53,14 @@ Now go build something awesome! Here are some **ideas** to get your creative jui
 * Securely send data between two servers, without using pub/sub.
 * Record your webcam and do special effects server side.
 * Build a conferencing application that processes audio/video and make decisions off of it.
+
+### Want to learn more about WebRTC?
+Check out [WebRTC for the Curious](https://webrtcforthecurious.com). A book about WebRTC in depth, not just about the APIs.
+Learn the full details of ICE, SCTP, DTLS, SRTP, and how they work together to make up the WebRTC stack.
+
+This is also a great resource if you are trying to debug. Leran the tools of the trade and how to approach WebRTC issues.
+
+This book is vendor agnostic and will not have any Pion specific information.
 
 ### WebAssembly
 Pion WebRTC can be used when compiled to WebAssembly, also known as WASM. In
@@ -160,6 +181,27 @@ Check out the **[contributing wiki](https://github.com/pion/webrtc/wiki/Contribu
 * [salmān aljammāz](https://github.com/saljam)
 * [cnderrauber](https://github.com/cnderrauber)
 * [Juliusz Chroboczek](https://github.com/jech)
+* [John Berthels](https://github.com/jbert)
+* [Somers Matthews](https://github.com/somersbmatthews)
+* [Vitaliy F](https://github.com/funvit)
+* [Ivan Egorov](https://github.com/vany-egorov)
+* [Nick Mykins](https://github.com/nmyk)
+* [Jason Brady](https://github.com/jbrady42)
+* [krishna chiatanya](https://github.com/kittuov)
+* [JacobZwang](https://github.com/JacobZwang)
+* [박종훈](https://github.com/JonghunBok)
+* [Sam Lancia](https://github.com/nerd2)
+* [Henry](https://github.com/cryptix)
+* [Jeff Tchang](https://github.com/tachang)
+* [JooYoung Lim](https://github.com/DevRockstarZ)
+* [Sidney San Martín](https://github.com/s4y)
+* [soolaugust](https://github.com/soolaugust)
+* [Kuzmin Vladimir](https://github.com/tekig)
+* [Alessandro Ros](https://github.com/aler9)
+* [Thomas Miller](https://github.com/tmiv)
+* [yoko(q191201771)](https://github.com/q191201771)
+* [Joshua Obasaju](https://github.com/obasajujoshua31)
+* [Mission Liao](https://github.com/mission-liao)
 
 ### License
 MIT License - see [LICENSE](LICENSE) for full text

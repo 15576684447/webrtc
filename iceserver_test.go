@@ -5,8 +5,8 @@ package webrtc
 import (
 	"testing"
 
-	"github.com/pion/ice"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
+	"github.com/pion/ice/v2"
+	"github.com/pion/webrtc/v3/pkg/rtcerr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -69,7 +69,7 @@ func TestICEServer_validate(t *testing.T) {
 				Username:       "unittest",
 				Credential:     false,
 				CredentialType: ICECredentialTypeOauth,
-			}, ice.ErrSTUNQuery},
+			}, &rtcerr.InvalidAccessError{Err: ice.ErrSTUNQuery}},
 		}
 
 		for i, testCase := range testCases {

@@ -72,6 +72,11 @@ func TestPeerConnection_Close_PreICE(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	_, err = pcOffer.CreateDataChannel("test-channel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	answer, err := pcOffer.CreateOffer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,36 +125,45 @@ func TestPeerConnection_Close_DuringICE(t *testing.T) {
 	pcAnswer.OnICEConnectionStateChange(func(iceState ICEConnectionState) {
 		if iceState == ICEConnectionStateConnected {
 			go func() {
-				if err2 := pcAnswer.Close(); err2 != nil {
-					t.Errorf("pcAnswer.Close() failed: %v", err2)
-				}
+				assert.NoError(t, pcAnswer.Close())
 				close(closedAnswer)
-				if err2 := pcOffer.Close(); err2 != nil {
-					t.Errorf("pcOffer.Close() failed: %v", err2)
-				}
+
+				assert.NoError(t, pcOffer.Close())
 				close(closedOffer)
 			}()
 		}
 	})
 
+	_, err = pcOffer.CreateDataChannel("test-channel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	offer, err := pcOffer.CreateOffer(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	offerGatheringComplete := GatheringCompletePromise(pcOffer)
 	if err = pcOffer.SetLocalDescription(offer); err != nil {
 		t.Fatal(err)
 	}
-	if err = pcAnswer.SetRemoteDescription(offer); err != nil {
+	<-offerGatheringComplete
+
+	if err = pcAnswer.SetRemoteDescription(*pcOffer.LocalDescription()); err != nil {
 		t.Fatal(err)
 	}
+
 	answer, err := pcAnswer.CreateAnswer(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	answerGatheringComplete := GatheringCompletePromise(pcAnswer)
 	if err = pcAnswer.SetLocalDescription(answer); err != nil {
 		t.Fatal(err)
 	}
-	if err = pcOffer.SetRemoteDescription(answer); err != nil {
+	<-answerGatheringComplete
+	if err = pcOffer.SetRemoteDescription(*pcAnswer.LocalDescription()); err != nil {
 		t.Fatal(err)
 	}
 

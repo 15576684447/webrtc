@@ -3,6 +3,7 @@
 package webrtc
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,13 +13,16 @@ import (
 	"math/big"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
+	"github.com/pion/rtp"
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
+	"github.com/pion/webrtc/v3/internal/util"
+	"github.com/pion/webrtc/v3/pkg/rtcerr"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -121,6 +125,34 @@ func TestNew_Go(t *testing.T) {
 				assert.NoError(t, pc.Close())
 			}
 		}
+	})
+	t.Run("ICEServers_Copy", func(t *testing.T) {
+		const expectedURL = "stun:stun.l.google.com:19302?foo=bar"
+		const expectedUsername = "username"
+		const expectedPassword = "password"
+
+		cfg := Configuration{
+			ICEServers: []ICEServer{
+				{
+					URLs:       []string{expectedURL},
+					Username:   expectedUsername,
+					Credential: expectedPassword,
+				},
+			},
+		}
+		pc, err := api.NewPeerConnection(cfg)
+		assert.NoError(t, err)
+		assert.NotNil(t, pc)
+
+		pc.configuration.ICEServers[0].Username = util.MathRandAlpha(15) // Tests doesn't need crypto random
+		pc.configuration.ICEServers[0].Credential = util.MathRandAlpha(15)
+		pc.configuration.ICEServers[0].URLs[0] = util.MathRandAlpha(15)
+
+		assert.Equal(t, expectedUsername, cfg.ICEServers[0].Username)
+		assert.Equal(t, expectedPassword, cfg.ICEServers[0].Credential)
+		assert.Equal(t, expectedURL, cfg.ICEServers[0].URLs[0])
+
+		assert.NoError(t, pc.Close())
 	})
 }
 
@@ -381,6 +413,32 @@ func TestPeerConnection_AnswerWithoutOffer(t *testing.T) {
 	assert.NoError(t, pc.Close())
 }
 
+func TestPeerConnection_AnswerWithClosedConnection(t *testing.T) {
+	report := test.CheckRoutines(t)
+	defer report()
+
+	offerPeerConn, err := NewPeerConnection(Configuration{})
+	assert.NoError(t, err)
+
+	answerPeerConn, err := NewPeerConnection(Configuration{})
+	assert.NoError(t, err)
+
+	_, err = offerPeerConn.CreateDataChannel("test-channel", nil)
+	assert.NoError(t, err)
+
+	offer, err := offerPeerConn.CreateOffer(nil)
+	assert.NoError(t, err)
+	assert.NoError(t, offerPeerConn.SetLocalDescription(offer))
+
+	assert.NoError(t, answerPeerConn.SetRemoteDescription(offer))
+
+	assert.NoError(t, offerPeerConn.Close())
+	assert.NoError(t, answerPeerConn.Close())
+
+	_, err = answerPeerConn.CreateAnswer(nil)
+	assert.Error(t, err, &rtcerr.InvalidStateError{Err: ErrConnectionClosed})
+}
+
 func TestPeerConnection_satisfyTypeAndDirection(t *testing.T) {
 	createTransceiver := func(kind RTPCodecType, direction RTPTransceiverDirection) *RTPTransceiver {
 		r := &RTPTransceiver{kind: kind}
@@ -494,88 +552,16 @@ func TestOneAttrKeyConnectionSetupPerMediaDescriptionInSDP(t *testing.T) {
 
 	matches := re.FindAllStringIndex(sdp.SDP, -1)
 
-	// 5 because a datachannel is always added
-	assert.Len(t, matches, 5)
+	assert.Len(t, matches, 4)
 	assert.NoError(t, pc.Close())
-}
-
-// Assert that candidates are gathered by calling SetLocalDescription, not SetRemoteDescription
-// When trickle in on by default we can move this to peerconnection_test.go
-func TestGatherOnSetLocalDescription(t *testing.T) {
-	lim := test.TimeOut(time.Second * 30)
-	defer lim.Stop()
-
-	report := test.CheckRoutines(t)
-	defer report()
-
-	pcOfferGathered := make(chan SessionDescription)
-	pcAnswerGathered := make(chan SessionDescription)
-
-	s := SettingEngine{}
-	s.SetTrickle(true)
-	api := NewAPI(WithSettingEngine(s))
-
-	pcOffer, err := api.NewPeerConnection(Configuration{})
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	// We need to create a data channel in order to trigger ICE
-	if _, err = pcOffer.CreateDataChannel("initial_data_channel", nil); err != nil {
-		t.Error(err.Error())
-	}
-
-	pcOffer.OnICECandidate(func(i *ICECandidate) {
-		if i == nil {
-			close(pcOfferGathered)
-		}
-	})
-
-	offer, err := pcOffer.CreateOffer(nil)
-	if err != nil {
-		t.Error(err.Error())
-	} else if err = pcOffer.SetLocalDescription(offer); err != nil {
-		t.Error(err.Error())
-	}
-
-	<-pcOfferGathered
-
-	pcAnswer, err := api.NewPeerConnection(Configuration{})
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	pcAnswer.OnICECandidate(func(i *ICECandidate) {
-		if i == nil {
-			close(pcAnswerGathered)
-		}
-	})
-
-	if err = pcAnswer.SetRemoteDescription(offer); err != nil {
-		t.Error(err.Error())
-	}
-
-	select {
-	case <-pcAnswerGathered:
-		t.Fatal("pcAnswer started gathering with no SetLocalDescription")
-	// Gathering is async, not sure of a better way to catch this currently
-	case <-time.After(3 * time.Second):
-	}
-
-	answer, err := pcAnswer.CreateAnswer(nil)
-	if err != nil {
-		t.Error(err.Error())
-	} else if err = pcAnswer.SetLocalDescription(answer); err != nil {
-		t.Error(err.Error())
-	}
-	<-pcAnswerGathered
-	assert.NoError(t, pcOffer.Close())
-	assert.NoError(t, pcAnswer.Close())
 }
 
 func TestPeerConnection_OfferingLite(t *testing.T) {
 	report := test.CheckRoutines(t)
 	defer report()
+
+	lim := test.TimeOut(time.Second * 10)
+	defer lim.Stop()
 
 	s := SettingEngine{}
 	s.SetLite(true)
@@ -612,6 +598,9 @@ func TestPeerConnection_OfferingLite(t *testing.T) {
 func TestPeerConnection_AnsweringLite(t *testing.T) {
 	report := test.CheckRoutines(t)
 	defer report()
+
+	lim := test.TimeOut(time.Second * 10)
+	defer lim.Stop()
 
 	offerPC, err := NewAPI().NewPeerConnection(Configuration{})
 	if err != nil {
@@ -652,10 +641,7 @@ func TestOnICEGatheringStateChange(t *testing.T) {
 	seenGatheringAndComplete := make(chan interface{})
 	seenClosed := make(chan interface{})
 
-	s := SettingEngine{}
-	s.SetTrickle(true)
-
-	peerConn, err := NewAPI(WithSettingEngine(s)).NewPeerConnection(Configuration{})
+	peerConn, err := NewPeerConnection(Configuration{})
 	assert.NoError(t, err)
 
 	var onStateChange func(s ICEGathererState)
@@ -708,19 +694,12 @@ func TestOnICEGatheringStateChange(t *testing.T) {
 	}
 }
 
-// Assert that when Trickle is enabled two connections can connect
+// Assert Trickle ICE behaviors
 func TestPeerConnectionTrickle(t *testing.T) {
-	lim := test.TimeOut(time.Second * 10)
-	defer lim.Stop()
+	offerPC, answerPC, err := newPair()
+	assert.NoError(t, err)
 
-	report := test.CheckRoutines(t)
-	defer report()
-
-	s := SettingEngine{}
-	s.SetTrickle(true)
-
-	api := NewAPI(WithSettingEngine(s))
-	offerPC, answerPC, err := api.newPair(Configuration{})
+	_, err = offerPC.CreateDataChannel("test-channel", nil)
 	assert.NoError(t, err)
 
 	addOrCacheCandidate := func(pc *PeerConnection, c *ICECandidate, candidateCache []ICECandidateInit) []ICECandidateInit {
@@ -819,35 +798,253 @@ func TestPopulateLocalCandidates(t *testing.T) {
 		offer, err := pc.CreateOffer(nil)
 		assert.NoError(t, err)
 
+		offerGatheringComplete := GatheringCompletePromise(pc)
 		assert.NoError(t, pc.SetLocalDescription(offer))
+		<-offerGatheringComplete
+
 		assert.Equal(t, pc.PendingLocalDescription(), pc.PendingLocalDescription())
 		assert.NoError(t, pc.Close())
 	})
 
 	t.Run("end-of-candidates only when gathering is complete", func(t *testing.T) {
-		s := SettingEngine{}
-		s.SetTrickle(true)
-
-		pc, err := NewAPI(WithSettingEngine(s)).NewPeerConnection(Configuration{})
+		pc, err := NewAPI().NewPeerConnection(Configuration{})
 		assert.NoError(t, err)
 
-		gatherComplete, gatherCompleteCancel := context.WithCancel(context.Background())
-		pc.OnICEGatheringStateChange(func(i ICEGathererState) {
-			if i == ICEGathererStateComplete {
-				gatherCompleteCancel()
-			}
-		})
+		_, err = pc.CreateDataChannel("test-channel", nil)
+		assert.NoError(t, err)
 
 		offer, err := pc.CreateOffer(nil)
 		assert.NoError(t, err)
 		assert.NotContains(t, offer.SDP, "a=candidate")
 		assert.NotContains(t, offer.SDP, "a=end-of-candidates")
 
+		offerGatheringComplete := GatheringCompletePromise(pc)
 		assert.NoError(t, pc.SetLocalDescription(offer))
-		<-gatherComplete.Done()
+		<-offerGatheringComplete
+
 		assert.Contains(t, pc.PendingLocalDescription().SDP, "a=candidate")
 		assert.Contains(t, pc.PendingLocalDescription().SDP, "a=end-of-candidates")
 
 		assert.NoError(t, pc.Close())
 	})
+}
+
+// Assert that two agents that only generate mDNS candidates can connect
+func TestMulticastDNSCandidates(t *testing.T) {
+	lim := test.TimeOut(time.Second * 30)
+	defer lim.Stop()
+
+	report := test.CheckRoutines(t)
+	defer report()
+
+	s := SettingEngine{}
+	s.GenerateMulticastDNSCandidates(true)
+
+	pcOffer, pcAnswer, err := NewAPI(WithSettingEngine(s)).newPair(Configuration{})
+	assert.NoError(t, err)
+
+	assert.NoError(t, signalPair(pcOffer, pcAnswer))
+
+	onDataChannel, onDataChannelCancel := context.WithCancel(context.Background())
+	pcAnswer.OnDataChannel(func(d *DataChannel) {
+		onDataChannelCancel()
+	})
+	<-onDataChannel.Done()
+
+	assert.NoError(t, pcOffer.Close())
+	assert.NoError(t, pcAnswer.Close())
+}
+
+func TestICERestart(t *testing.T) {
+	extractCandidates := func(sdp string) (candidates []string) {
+		sc := bufio.NewScanner(strings.NewReader(sdp))
+		for sc.Scan() {
+			if strings.HasPrefix(sc.Text(), "a=candidate:") {
+				candidates = append(candidates, sc.Text())
+			}
+		}
+
+		return
+	}
+
+	lim := test.TimeOut(time.Second * 30)
+	defer lim.Stop()
+
+	report := test.CheckRoutines(t)
+	defer report()
+
+	offerPC, answerPC, err := newPair()
+	assert.NoError(t, err)
+
+	var connectedWaitGroup sync.WaitGroup
+	connectedWaitGroup.Add(2)
+
+	offerPC.OnICEConnectionStateChange(func(state ICEConnectionState) {
+		if state == ICEConnectionStateConnected {
+			connectedWaitGroup.Done()
+		}
+	})
+	answerPC.OnICEConnectionStateChange(func(state ICEConnectionState) {
+		if state == ICEConnectionStateConnected {
+			connectedWaitGroup.Done()
+		}
+	})
+
+	// Connect two PeerConnections and block until ICEConnectionStateConnected
+	assert.NoError(t, signalPair(offerPC, answerPC))
+	connectedWaitGroup.Wait()
+
+	// Store candidates from first Offer/Answer, compare later to make sure we re-gathered
+	firstOfferCandidates := extractCandidates(offerPC.LocalDescription().SDP)
+	firstAnswerCandidates := extractCandidates(answerPC.LocalDescription().SDP)
+
+	// Re-signal with ICE Restart, block until ICEConnectionStateConnected
+	connectedWaitGroup.Add(2)
+	offer, err := offerPC.CreateOffer(&OfferOptions{ICERestart: true})
+	assert.NoError(t, err)
+
+	// Block until Gathering is Complete
+	offerGatheringComplete := GatheringCompletePromise(offerPC)
+	assert.NoError(t, offerPC.SetLocalDescription(offer))
+	<-offerGatheringComplete
+
+	assert.NoError(t, answerPC.SetRemoteDescription(*offerPC.LocalDescription()))
+
+	answer, err := answerPC.CreateAnswer(nil)
+	assert.NoError(t, err)
+
+	// Block until Gathering is Complete
+	answerGatheringComplete := GatheringCompletePromise(answerPC)
+	assert.NoError(t, answerPC.SetLocalDescription(answer))
+	<-answerGatheringComplete
+
+	assert.NoError(t, offerPC.SetRemoteDescription(*answerPC.LocalDescription()))
+
+	// Block until we have connected again
+	connectedWaitGroup.Wait()
+
+	// Compare ICE Candidates across each run, fail if they haven't changed
+	assert.NotEqual(t, firstOfferCandidates, extractCandidates(offerPC.LocalDescription().SDP))
+	assert.NotEqual(t, firstAnswerCandidates, extractCandidates(answerPC.LocalDescription().SDP))
+	assert.NoError(t, offerPC.Close())
+	assert.NoError(t, answerPC.Close())
+}
+
+type trackRecords struct {
+	mu               sync.Mutex
+	trackIDs         map[string]struct{}
+	receivedTrackIDs map[string]struct{}
+}
+
+func (r *trackRecords) newTrackParameter() (uint8, uint32, string, string) {
+	trackID := fmt.Sprintf("pion-track-%d", len(r.trackIDs))
+	r.trackIDs[trackID] = struct{}{}
+	return DefaultPayloadTypeVP8, uint32(len(r.trackIDs)), trackID, "pion"
+}
+
+func (r *trackRecords) handleTrack(t *Track, _ *RTPReceiver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tID := t.ID()
+	if _, exist := r.trackIDs[tID]; exist {
+		r.receivedTrackIDs[tID] = struct{}{}
+	}
+}
+
+func (r *trackRecords) remains() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.trackIDs) - len(r.receivedTrackIDs)
+}
+
+// This test assure that all track events emits.
+func TestPeerConnection_MassiveTracks(t *testing.T) {
+	var (
+		api   = NewAPI()
+		tRecs = &trackRecords{
+			trackIDs:         make(map[string]struct{}),
+			receivedTrackIDs: make(map[string]struct{}),
+		}
+		tracks          = []*Track{}
+		trackCount      = 256
+		pingInterval    = 1 * time.Second
+		noiseInterval   = 100 * time.Microsecond
+		timeoutDuration = 20 * time.Second
+		rawPkt          = []byte{
+			0x90, 0xe0, 0x69, 0x8f, 0xd9, 0xc2, 0x93, 0xda, 0x1c, 0x64,
+			0x27, 0x82, 0x00, 0x01, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x98, 0x36, 0xbe, 0x88, 0x9e,
+		}
+		samplePkt = &rtp.Packet{
+			Header: rtp.Header{
+				Marker:           true,
+				Extension:        false,
+				ExtensionProfile: 1,
+				Version:          2,
+				PayloadOffset:    20,
+				PayloadType:      DefaultPayloadTypeVP8,
+				SequenceNumber:   27023,
+				Timestamp:        3653407706,
+				CSRC:             []uint32{},
+			},
+			Payload: rawPkt[20:],
+		}
+		connected = make(chan struct{})
+		stopped   = make(chan struct{})
+	)
+	api.mediaEngine.RegisterDefaultCodecs()
+	offerPC, answerPC, err := api.newPair(Configuration{})
+	assert.NoError(t, err)
+	// Create massive tracks.
+	for range make([]struct{}, trackCount) {
+		track, err := offerPC.NewTrack(tRecs.newTrackParameter())
+		assert.NoError(t, err)
+		_, err = offerPC.AddTrack(track)
+		assert.NoError(t, err)
+		tracks = append(tracks, track)
+	}
+	answerPC.OnTrack(tRecs.handleTrack)
+	offerPC.OnICEConnectionStateChange(func(s ICEConnectionState) {
+		if s == ICEConnectionStateConnected {
+			close(connected)
+		}
+	})
+	// A routine to periodically call GetTransceivers. This action might cause
+	// the deadlock and prevent track event to emit.
+	go func() {
+		for {
+			answerPC.GetTransceivers()
+			time.Sleep(noiseInterval)
+			select {
+			case <-stopped:
+				return
+			default:
+			}
+		}
+	}()
+	assert.NoError(t, signalPair(offerPC, answerPC))
+	// Send a RTP packets to each track to trigger track event after connected.
+	<-connected
+	time.Sleep(1 * time.Second)
+	for _, track := range tracks {
+		samplePkt.SSRC = track.SSRC()
+		assert.NoError(t, track.WriteRTP(samplePkt))
+	}
+	// Ping trackRecords to see if any track event not received yet.
+	tooLong := time.After(timeoutDuration)
+	for {
+		remains := tRecs.remains()
+		if remains == 0 {
+			break
+		}
+		t.Log("remain tracks", remains)
+		time.Sleep(pingInterval)
+		select {
+		case <-tooLong:
+			t.Error("unable to receive all track events in time")
+		default:
+		}
+	}
+	close(stopped)
+	assert.NoError(t, offerPC.Close())
+	assert.NoError(t, answerPC.Close())
 }

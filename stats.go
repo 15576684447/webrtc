@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 )
 
 // A Stats object contains a set of statistics copies out of a monitored component
@@ -1195,7 +1195,7 @@ func toStatsICECandidatePairState(state ice.CandidatePairState) (StatsICECandida
 		err := fmt.Errorf(
 			"cannot convert to StatsICECandidatePairStateSucceeded invalid ice candidate state: %s",
 			state.String())
-		return StatsICECandidatePairState(Unknown), err
+		return StatsICECandidatePairState("Unknown"), err
 	}
 }
 

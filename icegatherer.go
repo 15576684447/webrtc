@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 	"github.com/pion/logging"
 )
 
@@ -24,8 +24,11 @@ type ICEGatherer struct {
 
 	agent *ice.Agent
 
-	onLocalCandidateHdlr atomic.Value // func(candidate *ICECandidate)
-	onStateChangeHdlr    atomic.Value // func(state ICEGathererState)
+	onLocalCandidateHandler atomic.Value // func(candidate *ICECandidate)
+	onStateChangeHandler    atomic.Value // func(state ICEGathererState)
+
+	// Used for GatheringCompletePromise
+	onGatheringCompleteHandler atomic.Value // func()
 
 	api *API
 }
@@ -58,7 +61,7 @@ func (g *ICEGatherer) createAgent() error {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	if g.agent != nil {
+	if g.agent != nil || g.State() != ICEGathererStateNew {
 		return nil
 	}
 
@@ -85,28 +88,28 @@ func (g *ICEGatherer) createAgent() error {
 	}
 
 	config := &ice.AgentConfig{
-		Trickle:                   g.api.settingEngine.candidates.ICETrickle,
-		Lite:                      g.api.settingEngine.candidates.ICELite,
-		Urls:                      g.validatedServers,
-		PortMin:                   g.api.settingEngine.ephemeralUDP.PortMin,
-		PortMax:                   g.api.settingEngine.ephemeralUDP.PortMax,
-		ConnectionTimeout:         g.api.settingEngine.timeout.ICEConnection,
-		KeepaliveInterval:         g.api.settingEngine.timeout.ICEKeepalive,
-		LoggerFactory:             g.api.settingEngine.LoggerFactory,
-		CandidateTypes:            candidateTypes,
-		CandidateSelectionTimeout: g.api.settingEngine.timeout.ICECandidateSelectionTimeout,
-		HostAcceptanceMinWait:     g.api.settingEngine.timeout.ICEHostAcceptanceMinWait,
-		SrflxAcceptanceMinWait:    g.api.settingEngine.timeout.ICESrflxAcceptanceMinWait,
-		PrflxAcceptanceMinWait:    g.api.settingEngine.timeout.ICEPrflxAcceptanceMinWait,
-		RelayAcceptanceMinWait:    g.api.settingEngine.timeout.ICERelayAcceptanceMinWait,
-		InterfaceFilter:           g.api.settingEngine.candidates.InterfaceFilter,
-		NAT1To1IPs:                g.api.settingEngine.candidates.NAT1To1IPs,
-		NAT1To1IPCandidateType:    nat1To1CandiTyp,
-		Net:                       g.api.settingEngine.vnet,
-		MulticastDNSMode:          multicastDNSMode,
-		MulticastDNSHostName:      g.api.settingEngine.candidates.MulticastDNSHostName,
-		LocalUfrag:                g.api.settingEngine.candidates.UsernameFragment,
-		LocalPwd:                  g.api.settingEngine.candidates.Password,
+		Lite:                   g.api.settingEngine.candidates.ICELite,
+		Urls:                   g.validatedServers,
+		PortMin:                g.api.settingEngine.ephemeralUDP.PortMin,
+		PortMax:                g.api.settingEngine.ephemeralUDP.PortMax,
+		DisconnectedTimeout:    g.api.settingEngine.timeout.ICEDisconnectedTimeout,
+		FailedTimeout:          g.api.settingEngine.timeout.ICEFailedTimeout,
+		KeepaliveInterval:      g.api.settingEngine.timeout.ICEKeepaliveInterval,
+		LoggerFactory:          g.api.settingEngine.LoggerFactory,
+		CandidateTypes:         candidateTypes,
+		HostAcceptanceMinWait:  g.api.settingEngine.timeout.ICEHostAcceptanceMinWait,
+		SrflxAcceptanceMinWait: g.api.settingEngine.timeout.ICESrflxAcceptanceMinWait,
+		PrflxAcceptanceMinWait: g.api.settingEngine.timeout.ICEPrflxAcceptanceMinWait,
+		RelayAcceptanceMinWait: g.api.settingEngine.timeout.ICERelayAcceptanceMinWait,
+		InterfaceFilter:        g.api.settingEngine.candidates.InterfaceFilter,
+		NAT1To1IPs:             g.api.settingEngine.candidates.NAT1To1IPs,
+		NAT1To1IPCandidateType: nat1To1CandiTyp,
+		Net:                    g.api.settingEngine.vnet,
+		MulticastDNSMode:       multicastDNSMode,
+		MulticastDNSHostName:   g.api.settingEngine.candidates.MulticastDNSHostName,
+		LocalUfrag:             g.api.settingEngine.candidates.UsernameFragment,
+		LocalPwd:               g.api.settingEngine.candidates.Password,
+		TCPMux:                 g.api.settingEngine.iceTCPMux,
 	}
 
 	requestedNetworkTypes := g.api.settingEngine.candidates.ICENetworkTypes
@@ -124,10 +127,6 @@ func (g *ICEGatherer) createAgent() error {
 	}
 
 	g.agent = agent
-	if !g.api.settingEngine.candidates.ICETrickle {
-		atomicStoreICEGathererState(&g.state, ICEGathererStateComplete)
-	}
-
 	return nil
 }
 
@@ -137,33 +136,34 @@ func (g *ICEGatherer) Gather() error {
 		return err
 	}
 
-	onLocalCandidateHdlr := func(*ICECandidate) {}
-	if hdlr, ok := g.onLocalCandidateHdlr.Load().(func(candidate *ICECandidate)); ok && hdlr != nil {
-		onLocalCandidateHdlr = hdlr
-	}
-
 	g.lock.Lock()
-	isTrickle := g.api.settingEngine.candidates.ICETrickle
 	agent := g.agent
 	g.lock.Unlock()
 
-	if !isTrickle {
-		return nil
-	}
-
 	g.setState(ICEGathererStateGathering)
 	if err := agent.OnCandidate(func(candidate ice.Candidate) {
+		onLocalCandidateHandler := func(*ICECandidate) {}
+		if handler, ok := g.onLocalCandidateHandler.Load().(func(candidate *ICECandidate)); ok && handler != nil {
+			onLocalCandidateHandler = handler
+		}
+
+		onGatheringCompleteHandler := func() {}
+		if handler, ok := g.onGatheringCompleteHandler.Load().(func()); ok && handler != nil {
+			onGatheringCompleteHandler = handler
+		}
+
 		if candidate != nil {
 			c, err := newICECandidateFromICE(candidate)
 			if err != nil {
 				g.log.Warnf("Failed to convert ice.Candidate: %s", err)
 				return
 			}
-			onLocalCandidateHdlr(&c)
+			onLocalCandidateHandler(&c)
 		} else {
 			g.setState(ICEGathererStateComplete)
 
-			onLocalCandidateHdlr(nil)
+			onGatheringCompleteHandler()
+			onLocalCandidateHandler(nil)
 		}
 	}); err != nil {
 		return err
@@ -194,7 +194,11 @@ func (g *ICEGatherer) GetLocalParameters() (ICEParameters, error) {
 		return ICEParameters{}, err
 	}
 
-	frag, pwd := g.agent.GetLocalUserCredentials()
+	frag, pwd, err := g.agent.GetLocalUserCredentials()
+	if err != nil {
+		return ICEParameters{}, err
+	}
+
 	return ICEParameters{
 		UsernameFragment: frag,
 		Password:         pwd,
@@ -218,12 +222,12 @@ func (g *ICEGatherer) GetLocalCandidates() ([]ICECandidate, error) {
 // OnLocalCandidate sets an event handler which fires when a new local ICE candidate is available
 // Take note that the handler is gonna be called with a nil pointer when gathering is finished.
 func (g *ICEGatherer) OnLocalCandidate(f func(*ICECandidate)) {
-	g.onLocalCandidateHdlr.Store(f)
+	g.onLocalCandidateHandler.Store(f)
 }
 
 // OnStateChange fires any time the ICEGatherer changes
 func (g *ICEGatherer) OnStateChange(f func(ICEGathererState)) {
-	g.onStateChangeHdlr.Store(f)
+	g.onStateChangeHandler.Store(f)
 }
 
 // State indicates the current state of the ICE gatherer.
@@ -234,8 +238,8 @@ func (g *ICEGatherer) State() ICEGathererState {
 func (g *ICEGatherer) setState(s ICEGathererState) {
 	atomicStoreICEGathererState(&g.state, s)
 
-	if hdlr, ok := g.onStateChangeHdlr.Load().(func(state ICEGathererState)); ok && hdlr != nil {
-		hdlr(s)
+	if handler, ok := g.onStateChangeHandler.Load().(func(state ICEGathererState)); ok && handler != nil {
+		handler(s)
 	}
 }
 
@@ -243,32 +247,6 @@ func (g *ICEGatherer) getAgent() *ice.Agent {
 	g.lock.RLock()
 	defer g.lock.RUnlock()
 	return g.agent
-}
-
-// SignalCandidates imitates gathering process to backward support old trickle
-// false behavior.
-func (g *ICEGatherer) SignalCandidates() error {
-	candidates, err := g.GetLocalCandidates()
-	if err != nil {
-		return err
-	}
-
-	var onLocalCandidateHdlr func(*ICECandidate)
-	if hdlr, ok := g.onLocalCandidateHdlr.Load().(func(candidate *ICECandidate)); ok {
-		onLocalCandidateHdlr = hdlr
-	}
-
-	if onLocalCandidateHdlr != nil {
-		go func() {
-			for i := range candidates {
-				onLocalCandidateHdlr(&candidates[i])
-			}
-			// Call the handler one last time with nil. This is a signal that candidate
-			// gathering is complete.
-			onLocalCandidateHdlr(nil)
-		}()
-	}
-	return nil
 }
 
 func (g *ICEGatherer) collectStats(collector *statsReportCollector) {

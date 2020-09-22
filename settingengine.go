@@ -6,8 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 	"github.com/pion/logging"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/transport/vnet"
 )
 
@@ -23,17 +24,16 @@ type SettingEngine struct {
 		DataChannels bool
 	}
 	timeout struct {
-		ICEConnection                *time.Duration
-		ICEKeepalive                 *time.Duration
-		ICECandidateSelectionTimeout *time.Duration
-		ICEHostAcceptanceMinWait     *time.Duration
-		ICESrflxAcceptanceMinWait    *time.Duration
-		ICEPrflxAcceptanceMinWait    *time.Duration
-		ICERelayAcceptanceMinWait    *time.Duration
+		ICEDisconnectedTimeout    *time.Duration
+		ICEFailedTimeout          *time.Duration
+		ICEKeepaliveInterval      *time.Duration
+		ICEHostAcceptanceMinWait  *time.Duration
+		ICESrflxAcceptanceMinWait *time.Duration
+		ICEPrflxAcceptanceMinWait *time.Duration
+		ICERelayAcceptanceMinWait *time.Duration
 	}
 	candidates struct {
 		ICELite                        bool
-		ICETrickle                     bool
 		ICENetworkTypes                []NetworkType
 		InterfaceFilter                func(string) bool
 		NAT1To1IPs                     []string
@@ -48,12 +48,15 @@ type SettingEngine struct {
 		SRTP  *uint
 		SRTCP *uint
 	}
+	sdpMediaLevelFingerprints                 bool
+	sdpExtensions                             map[SDPSectionType][]sdp.ExtMap
 	answeringDTLSRole                         DTLSRole
 	disableCertificateFingerprintVerification bool
 	disableSRTPReplayProtection               bool
 	disableSRTCPReplayProtection              bool
 	vnet                                      *vnet.Net
 	LoggerFactory                             logging.LoggerFactory
+	iceTCPMux                                 ice.TCPMux
 }
 
 // DetachDataChannels enables detaching data channels. When enabled
@@ -63,16 +66,14 @@ func (e *SettingEngine) DetachDataChannels() {
 	e.detach.DataChannels = true
 }
 
-// SetConnectionTimeout sets the amount of silence needed on a given candidate pair
-// before the ICE agent considers the pair timed out.
-func (e *SettingEngine) SetConnectionTimeout(connectionTimeout, keepAlive time.Duration) {
-	e.timeout.ICEConnection = &connectionTimeout
-	e.timeout.ICEKeepalive = &keepAlive
-}
-
-// SetCandidateSelectionTimeout sets the max ICECandidateSelectionTimeout
-func (e *SettingEngine) SetCandidateSelectionTimeout(t time.Duration) {
-	e.timeout.ICECandidateSelectionTimeout = &t
+// SetICETimeouts sets the behavior around ICE Timeouts
+// * disconnectedTimeout is the duration without network activity before a Agent is considered disconnected. Default is 5 Seconds
+// * failedTimeout is the duration without network activity before a Agent is considered failed after disconnected. Default is 25 Seconds
+// * keepAliveInterval is how often the ICE Agent sends extra traffic if there is no activity, if media is flowing no traffic will be sent. Default is 2 seconds
+func (e *SettingEngine) SetICETimeouts(disconnectedTimeout, failedTimeout, keepAliveInterval time.Duration) {
+	e.timeout.ICEDisconnectedTimeout = &disconnectedTimeout
+	e.timeout.ICEFailedTimeout = &failedTimeout
+	e.timeout.ICEKeepaliveInterval = &keepAliveInterval
 }
 
 // SetHostAcceptanceMinWait sets the ICEHostAcceptanceMinWait
@@ -111,12 +112,6 @@ func (e *SettingEngine) SetEphemeralUDPPortRange(portMin, portMax uint16) error 
 // SetLite configures whether or not the ice agent should be a lite agent
 func (e *SettingEngine) SetLite(lite bool) {
 	e.candidates.ICELite = lite
-}
-
-// SetTrickle configures whether or not the ice agent should gather candidates
-// via the trickle method or synchronously.
-func (e *SettingEngine) SetTrickle(trickle bool) {
-	e.candidates.ICETrickle = trickle
 }
 
 // SetNetworkTypes configures what types of candidate networks are supported
@@ -238,4 +233,80 @@ func (e *SettingEngine) DisableSRTPReplayProtection(isDisabled bool) {
 // DisableSRTCPReplayProtection disables SRTCP replay protection.
 func (e *SettingEngine) DisableSRTCPReplayProtection(isDisabled bool) {
 	e.disableSRTCPReplayProtection = isDisabled
+}
+
+// SetSDPMediaLevelFingerprints configures the logic for DTLS Fingerprint insertion
+// If true, fingerprints will be inserted in the sdp at the fingerprint
+// level, instead of the session level. This helps with compatibility with
+// some webrtc implementations.
+func (e *SettingEngine) SetSDPMediaLevelFingerprints(sdpMediaLevelFingerprints bool) {
+	e.sdpMediaLevelFingerprints = sdpMediaLevelFingerprints
+}
+
+// SetICETCPMux enables ICE-TCP when set to a non-nil value. Make sure that
+// NetworkTypeTCP4 or NetworkTypeTCP6 is enabled as well.
+func (e *SettingEngine) SetICETCPMux(tcpMux ice.TCPMux) {
+	e.iceTCPMux = tcpMux
+}
+
+// AddSDPExtensions adds available and offered extensions for media type.
+//
+// Ext IDs are optional and generated if you do not provide them
+// SDP answers will only include extensions supported by both sides
+func (e *SettingEngine) AddSDPExtensions(mediaType SDPSectionType, exts []sdp.ExtMap) {
+	if e.sdpExtensions == nil {
+		e.sdpExtensions = make(map[SDPSectionType][]sdp.ExtMap)
+	}
+	if _, ok := e.sdpExtensions[mediaType]; !ok {
+		e.sdpExtensions[mediaType] = []sdp.ExtMap{}
+	}
+	e.sdpExtensions[mediaType] = append(e.sdpExtensions[mediaType], exts...)
+}
+
+func (e *SettingEngine) getSDPExtensions() map[SDPSectionType][]sdp.ExtMap {
+	var lastID int
+	idMap := map[string]int{}
+
+	// Build provided ext id map
+	for _, extList := range e.sdpExtensions {
+		for _, ext := range extList {
+			if ext.Value != 0 {
+				idMap[ext.URI.String()] = ext.Value
+			}
+		}
+	}
+
+	// Find next available ID
+	nextID := func() {
+		var done bool
+		for !done {
+			lastID++
+			var found bool
+			for _, v := range idMap {
+				if lastID == v {
+					found = true
+					break
+				}
+			}
+			if !found {
+				done = true
+			}
+		}
+	}
+
+	// Assign missing IDs across all media types based on URI
+	for mType, extList := range e.sdpExtensions {
+		for i, ext := range extList {
+			if ext.Value == 0 {
+				if id, ok := idMap[ext.URI.String()]; ok {
+					e.sdpExtensions[mType][i].Value = id
+				} else {
+					nextID()
+					e.sdpExtensions[mType][i].Value = lastID
+					idMap[ext.URI.String()] = lastID
+				}
+			}
+		}
+	}
+	return e.sdpExtensions
 }

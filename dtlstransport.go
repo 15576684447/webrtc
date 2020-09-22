@@ -17,9 +17,9 @@ import (
 	"github.com/pion/dtls/v2"
 	"github.com/pion/dtls/v2/pkg/crypto/fingerprint"
 	"github.com/pion/srtp"
-	"github.com/pion/webrtc/v2/internal/mux"
-	"github.com/pion/webrtc/v2/internal/util"
-	"github.com/pion/webrtc/v2/pkg/rtcerr"
+	"github.com/pion/webrtc/v3/internal/mux"
+	"github.com/pion/webrtc/v3/internal/util"
+	"github.com/pion/webrtc/v3/pkg/rtcerr"
 )
 
 // DTLSTransport allows an application access to information about the DTLS
@@ -29,13 +29,14 @@ import (
 type DTLSTransport struct {
 	lock sync.RWMutex
 
-	iceTransport      *ICETransport
-	certificates      []Certificate
-	remoteParameters  DTLSParameters
-	remoteCertificate []byte
-	state             DTLSTransportState
+	iceTransport          *ICETransport
+	certificates          []Certificate
+	remoteParameters      DTLSParameters
+	remoteCertificate     []byte
+	state                 DTLSTransportState
+	srtpProtectionProfile srtp.ProtectionProfile
 
-	onStateChangeHdlr func(DTLSTransportState)
+	onStateChangeHandler func(DTLSTransportState)
 
 	conn *dtls.Conn
 
@@ -94,9 +95,9 @@ func (t *DTLSTransport) ICETransport() *ICETransport {
 // onStateChange requires the caller holds the lock
 func (t *DTLSTransport) onStateChange(state DTLSTransportState) {
 	t.state = state
-	hdlr := t.onStateChangeHdlr
-	if hdlr != nil {
-		hdlr(state)
+	handler := t.onStateChangeHandler
+	if handler != nil {
+		handler(state)
 	}
 }
 
@@ -105,7 +106,7 @@ func (t *DTLSTransport) onStateChange(state DTLSTransportState) {
 func (t *DTLSTransport) OnStateChange(f func(DTLSTransportState)) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	t.onStateChangeHdlr = f
+	t.onStateChangeHandler = f
 }
 
 // State returns the current dtls transport state.
@@ -153,7 +154,7 @@ func (t *DTLSTransport) startSRTP() error {
 	}
 
 	srtpConfig := &srtp.Config{
-		Profile:       srtp.ProtectionProfileAes128CmHmacSha1_80,
+		Profile:       t.srtpProtectionProfile,
 		LoggerFactory: t.api.settingEngine.LoggerFactory,
 	}
 	if t.api.settingEngine.replayProtection.SRTP != nil {
@@ -254,7 +255,7 @@ func (t *DTLSTransport) role() DTLSRole {
 
 	// Remote was auto and no explicit role was configured via SettingEngine
 	if t.iceTransport.Role() == ICERoleControlling {
-		return DTLSRoleClient
+		return DTLSRoleServer
 	}
 	return defaultDtlsRoleAnswer
 }
@@ -288,7 +289,7 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 					Certificate: [][]byte{cert.x509Cert.Raw},
 					PrivateKey:  cert.privateKey,
 				}},
-			SRTPProtectionProfiles: []dtls.SRTPProtectionProfile{dtls.SRTP_AES128_CM_HMAC_SHA1_80},
+			SRTPProtectionProfiles: []dtls.SRTPProtectionProfile{dtls.SRTP_AEAD_AES_128_GCM, dtls.SRTP_AES128_CM_HMAC_SHA1_80},
 			ClientAuth:             dtls.RequireAnyClientCert,
 			LoggerFactory:          t.api.settingEngine.LoggerFactory,
 			InsecureSkipVerify:     true,
@@ -321,6 +322,22 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 	if err != nil {
 		t.onStateChange(DTLSTransportStateFailed)
 		return err
+	}
+
+	srtpProfile, ok := dtlsConn.SelectedSRTPProtectionProfile()
+	if !ok {
+		t.onStateChange(DTLSTransportStateFailed)
+		return ErrNoSRTPProtectionProfile
+	}
+
+	switch srtpProfile {
+	case dtls.SRTP_AEAD_AES_128_GCM:
+		t.srtpProtectionProfile = srtp.ProtectionProfileAeadAes128Gcm
+	case dtls.SRTP_AES128_CM_HMAC_SHA1_80:
+		t.srtpProtectionProfile = srtp.ProtectionProfileAes128CmHmacSha1_80
+	default:
+		t.onStateChange(DTLSTransportStateFailed)
+		return ErrNoSRTPProtectionProfile
 	}
 
 	t.conn = dtlsConn

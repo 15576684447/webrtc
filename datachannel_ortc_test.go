@@ -3,11 +3,13 @@
 package webrtc
 
 import (
+	"github.com/stretchr/testify/assert"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v2/internal/util"
+	"github.com/pion/webrtc/v3/internal/util"
 )
 
 func TestDataChannel_ORTCE2E(t *testing.T) {
@@ -75,6 +77,19 @@ func TestDataChannel_ORTCE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// attempt to send when channel is closed
+	err = channelA.Send([]byte("ABC"))
+	assert.Error(t, err)
+	assert.Equal(t, io.ErrClosedPipe, err)
+
+	err = channelA.SendText("test")
+	assert.Error(t, err)
+	assert.Equal(t, io.ErrClosedPipe, err)
+
+	err = channelA.ensureOpen()
+	assert.Error(t, err)
+	assert.Equal(t, io.ErrClosedPipe, err)
 }
 
 type testORTCStack struct {
@@ -118,12 +133,18 @@ func (s *testORTCStack) setSignal(sig *testORTCSignal, isOffer bool) error {
 }
 
 func (s *testORTCStack) getSignal() (*testORTCSignal, error) {
-	// Gather candidates
-	err := s.gatherer.Gather()
-	if err != nil {
+	gatherFinished := make(chan struct{})
+	s.gatherer.OnLocalCandidate(func(i *ICECandidate) {
+		if i == nil {
+			close(gatherFinished)
+		}
+	})
+
+	if err := s.gatherer.Gather(); err != nil {
 		return nil, err
 	}
 
+	<-gatherFinished
 	iceCandidates, err := s.gatherer.GetLocalCandidates()
 	if err != nil {
 		return nil, err

@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 	"github.com/pion/logging"
-	"github.com/pion/webrtc/v2/internal/mux"
+	"github.com/pion/webrtc/v3/internal/mux"
 )
 
 // ICETransport allows an application access to information about the ICE
@@ -24,8 +24,8 @@ type ICETransport struct {
 	// State ICETransportState
 	// gatheringState ICEGathererState
 
-	onConnectionStateChangeHdlr       atomic.Value // func(ICETransportState)
-	onSelectedCandidatePairChangeHdlr atomic.Value // func(*ICECandidatePair)
+	onConnectionStateChangeHandler       atomic.Value // func(ICETransportState)
+	onSelectedCandidatePairChangeHandler atomic.Value // func(*ICECandidatePair)
 
 	state ICETransportState
 
@@ -113,7 +113,7 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	}
 	t.role = *role
 
-	// Drop the lock here to allow trickle-ICE candidates to be
+	// Drop the lock here to allow ICE candidates to be
 	// added so that the agent can complete a connection
 	t.lock.Unlock()
 
@@ -152,6 +152,23 @@ func (t *ICETransport) Start(gatherer *ICEGatherer, params ICEParameters, role *
 	return nil
 }
 
+// restart is not exposed currently because ORTC has users create a whole new ICETransport
+// so for now lets keep it private so we don't cause ORTC users to depend on non-standard APIs
+func (t *ICETransport) restart() error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		return errors.New("ICEAgent does not exist, unable to restart ICETransport")
+	}
+
+	if err := agent.Restart(t.gatherer.api.settingEngine.candidates.UsernameFragment, t.gatherer.api.settingEngine.candidates.Password); err != nil {
+		return err
+	}
+	return t.gatherer.Gather()
+}
+
 // Stop irreversibly stops the ICETransport.
 func (t *ICETransport) Stop() error {
 	t.lock.Lock()
@@ -168,26 +185,26 @@ func (t *ICETransport) Stop() error {
 // OnSelectedCandidatePairChange sets a handler that is invoked when a new
 // ICE candidate pair is selected
 func (t *ICETransport) OnSelectedCandidatePairChange(f func(*ICECandidatePair)) {
-	t.onSelectedCandidatePairChangeHdlr.Store(f)
+	t.onSelectedCandidatePairChangeHandler.Store(f)
 }
 
 func (t *ICETransport) onSelectedCandidatePairChange(pair *ICECandidatePair) {
-	hdlr := t.onSelectedCandidatePairChangeHdlr.Load()
-	if hdlr != nil {
-		hdlr.(func(*ICECandidatePair))(pair)
+	handler := t.onSelectedCandidatePairChangeHandler.Load()
+	if handler != nil {
+		handler.(func(*ICECandidatePair))(pair)
 	}
 }
 
 // OnConnectionStateChange sets a handler that is fired when the ICE
 // connection state changes.
 func (t *ICETransport) OnConnectionStateChange(f func(ICETransportState)) {
-	t.onConnectionStateChangeHdlr.Store(f)
+	t.onConnectionStateChangeHandler.Store(f)
 }
 
 func (t *ICETransport) onConnectionStateChange(state ICETransportState) {
-	hdlr := t.onConnectionStateChangeHdlr.Load()
-	if hdlr != nil {
-		hdlr.(func(ICETransportState))(state)
+	handler := t.onConnectionStateChangeHandler.Load()
+	if handler != nil {
+		handler.(func(ICETransportState))(state)
 	}
 }
 
@@ -271,8 +288,7 @@ func (t *ICETransport) NewEndpoint(f mux.MatchFunc) *mux.Endpoint {
 func (t *ICETransport) ensureGatherer() error {
 	if t.gatherer == nil {
 		return errors.New("gatherer not started")
-	} else if t.gatherer.getAgent() == nil && t.gatherer.api.settingEngine.candidates.ICETrickle {
-		// Special case for trickle=true. (issue-707)
+	} else if t.gatherer.getAgent() == nil {
 		if err := t.gatherer.createAgent(); err != nil {
 			return err
 		}
@@ -300,4 +316,33 @@ func (t *ICETransport) collectStats(collector *statsReportCollector) {
 	}
 
 	collector.Collect(stats.ID, stats)
+}
+
+func (t *ICETransport) haveRemoteCredentialsChange(newUfrag, newPwd string) bool {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		return false
+	}
+
+	uFrag, uPwd, err := agent.GetRemoteUserCredentials()
+	if err != nil {
+		return false
+	}
+
+	return uFrag != newUfrag || uPwd != newPwd
+}
+
+func (t *ICETransport) setRemoteCredentials(newUfrag, newPwd string) error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	agent := t.gatherer.getAgent()
+	if agent == nil {
+		return errors.New("ICEAgent does not exist, unable to SetRemoteCredentials")
+	}
+
+	return agent.SetRemoteCredentials(newUfrag, newPwd)
 }

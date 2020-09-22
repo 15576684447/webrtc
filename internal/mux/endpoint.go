@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pion/ice"
+	"github.com/pion/ice/v2"
 	"github.com/pion/transport/packetio"
 )
 
@@ -55,7 +55,7 @@ func (e *Endpoint) LocalAddr() net.Addr {
 
 // RemoteAddr is a stub
 func (e *Endpoint) RemoteAddr() net.Addr {
-	return e.mux.nextConn.LocalAddr()
+	return e.mux.nextConn.RemoteAddr()
 }
 
 // SetDeadline is a stub

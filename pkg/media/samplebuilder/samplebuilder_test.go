@@ -1,10 +1,11 @@
 package samplebuilder
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v2/pkg/media"
+	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -235,5 +236,38 @@ func TestSeqnumDistance(t *testing.T) {
 			t.Errorf("seqnumDistance(%d, %d) returned %d which must be %d",
 				data.x, data.y, ret, data.d)
 		}
+	}
+}
+
+func TestSampleBuilderCleanReference(t *testing.T) {
+	for _, seqStart := range []uint16{
+		0,
+		0xFFF8, // check upper boundary
+		0xFFFE, // check upper boundary
+	} {
+		seqStart := seqStart
+		t.Run(fmt.Sprintf("From%d", seqStart), func(t *testing.T) {
+			s := New(10, &fakeDepacketizer{})
+
+			s.Push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 0 + seqStart, Timestamp: 0}, Payload: []byte{0x01}})
+			s.Push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 1 + seqStart, Timestamp: 0}, Payload: []byte{0x02}})
+			s.Push(&rtp.Packet{Header: rtp.Header{SequenceNumber: 2 + seqStart, Timestamp: 0}, Payload: []byte{0x03}})
+			pkt4 := &rtp.Packet{Header: rtp.Header{SequenceNumber: 14 + seqStart, Timestamp: 120}, Payload: []byte{0x04}}
+			s.Push(pkt4)
+			pkt5 := &rtp.Packet{Header: rtp.Header{SequenceNumber: 12 + seqStart, Timestamp: 120}, Payload: []byte{0x05}}
+			s.Push(pkt5)
+
+			for i := 0; i < 3; i++ {
+				if s.buffer[(i+int(seqStart))%0x10000] != nil {
+					t.Errorf("Old packet (%d) is not unreferenced (maxLate: 10, pushed: 12)", i)
+				}
+			}
+			if s.buffer[(14+int(seqStart))%0x10000] != pkt4 {
+				t.Error("New packet must be referenced after jump")
+			}
+			if s.buffer[(12+int(seqStart))%0x10000] != pkt5 {
+				t.Error("New packet must be referenced after jump")
+			}
+		})
 	}
 }

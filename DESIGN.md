@@ -1,7 +1,7 @@
 <h1 align="center">
   Design
 </h1>
-WebRTC is a powerful, but complicated technology. You can build amazing things with it comes with a steep learning curve though.
+WebRTC is a powerful, but complicated technology you can build amazing things with, it comes with a steep learning curve though.
 Using WebRTC in the browser is easy, but outside the browser is more of a challenge. There are multiple libraries, and they all have
 varying levels of quality. Most are also difficult to build, and depend on libraries that aren't available in repos or portable.
 
@@ -19,7 +19,7 @@ When possible we leave all decisions to the user. When choice is possible (like 
 If you know how to use WebRTC in your browser, you know how to use Pion WebRTC.
 We try our best just to duplicate the Javascript API, so your code can look the same everywhere.
 
-If this is your first time using WebRTC, don't worry! We have multiple [examples](https://github.com/pion/webrtc/tree/master/examples) and [GoDoc](https://pkg.go.dev/github.com/pion/webrtc/v2)
+If this is your first time using WebRTC, don't worry! We have multiple [examples](https://github.com/pion/webrtc/tree/master/examples) and [GoDoc](https://pkg.go.dev/github.com/pion/webrtc/v3)
 
 ### Bring your own media
 Pion WebRTC doesn't make any assumptions about where your audio, video or text come from. You can use FFmpeg, GStreamer, MLT or just serve a video file.
