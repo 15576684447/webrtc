@@ -78,7 +78,7 @@ func InitWebRTC(iceServers []webrtc.ICEServer, icePortStart, icePortEnd uint16) 
 	if icePortStart != 0 || icePortEnd != 0 {
 		err = setting.SetEphemeralUDPPortRange(icePortStart, icePortEnd)
 	}
-
+	setting.LoggerFactory = log.CustomLoggerFactory{}
 	cfg.ICEServers = iceServers
 	return err
 }

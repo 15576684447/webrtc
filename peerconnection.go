@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 	"webrtc/webrtc/internal/util"
-	"webrtc/webrtc/ion-sfu/pkg/log"
 	"webrtc/webrtc/pkg/rtcerr"
 
 	"github.com/pion/logging"
@@ -113,8 +112,7 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 		connectionState:              PeerConnectionStateNew,
 
 		api: api,
-		log: log.InitLogger("pc"),
-		//log: api.settingEngine.LoggerFactory.NewLogger("pc"),
+		log: api.settingEngine.LoggerFactory.NewLogger("pc"),
 	}
 	pc.log.Debugf("NewPeerConnection: before config: %+#v\n", pc)
 	var err error

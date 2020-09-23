@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/pion/sdp/v2"
+	"math/rand"
 	"net/http"
 	"webrtc/webrtc"
 	"webrtc/webrtc/ion-sfu/pkg/log"
+)
+
+const (
+	IOSH264Fmtp       = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+	FireFoxH264Fmtp97 = "profile-level-id=42e01f;level-asymmetry-allowed=1"
 )
 
 func main() {
@@ -25,25 +32,21 @@ func main() {
 		{Type: webrtc.TypeRTCPFBNACK},
 		{Type: "nack pli"},
 	}
-
+	//TODO:codecMap定义了codec类型与其代号的映射关系，并将其Register到mediaEngine中
 	codecMap := map[uint8]*webrtc.RTPCodec{
 		// Opus
 		webrtc.DefaultPayloadTypeOpus: webrtc.NewRTPOpusCodec(webrtc.DefaultPayloadTypeOpus, 48000),
-		109:                           webrtc.NewRTPOpusCodec(109, 48000),
-		// VP8
-		webrtc.DefaultPayloadTypeVP8: webrtc.NewRTPVP8CodecExt(webrtc.DefaultPayloadTypeVP8, 90000, rtcpfb, ""),
-		120:                          webrtc.NewRTPVP8CodecExt(120, 90000, rtcpfb, ""),
-		// VP9
-		webrtc.DefaultPayloadTypeVP9: webrtc.NewRTPVP9Codec(webrtc.DefaultPayloadTypeVP9, 90000),
-		121:                          webrtc.NewRTPVP9Codec(121, 90000),
+		// H264
+		webrtc.DefaultPayloadTypeH264: webrtc.NewRTPH264CodecExt(webrtc.DefaultPayloadTypeH264, 90000, rtcpfb, IOSH264Fmtp),
+		97:                            webrtc.NewRTPH264CodecExt(97, 90000, rtcpfb, FireFoxH264Fmtp97),
 	}
 	for _, codec := range codecMap {
 		mediaEngine.RegisterCodec(codec)
 	}
 
 	settingEngine.SetTrickle(false)
-	settingEngine.DetachDataChannels()
 	settingEngine.SetEphemeralUDPPortRange(50000, 60000)
+	settingEngine.LoggerFactory = log.CustomLoggerFactory{}
 
 	webrtcApi := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine))
 	peerConnection, err := webrtcApi.NewPeerConnection(config)
@@ -56,6 +59,27 @@ func main() {
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		clientLogger.Debugf("ICE Connection State has changed: %s\n", connectionState.String())
 	})
+
+	//TODO:在newTrack时，涉及到的codec的payload值将会从之前Register的列表中获取
+	// 所以RegisterCodec可以按需注册，当然也可以RegisterDefaultCodecs注册所有默认的codec
+
+	// Create a video track
+	videoTrack, addTrackErr := peerConnection.NewTrack(getPayloadType(mediaEngine, webrtc.RTPCodecTypeVideo, "H264"), rand.Uint32(), "video", "bytertc")
+	if addTrackErr != nil {
+		panic(addTrackErr)
+	}
+	if _, addTrackErr = peerConnection.AddTrack(videoTrack); err != nil {
+		panic(addTrackErr)
+	}
+
+	// Create a audio track
+	audioTrack, addTrackErr := peerConnection.NewTrack(getPayloadType(mediaEngine, webrtc.RTPCodecTypeAudio, "opus"), rand.Uint32(), "audio", "bytertc")
+	if addTrackErr != nil {
+		panic(addTrackErr)
+	}
+	if _, addTrackErr = peerConnection.AddTrack(audioTrack); err != nil {
+		panic(addTrackErr)
+	}
 
 	// Create an offer to send to the browser
 	offer, err := peerConnection.CreateOffer(nil)
@@ -118,4 +142,14 @@ func mustSignalViaHTTP(offer webrtc.SessionDescription, address string) webrtc.S
 	}
 
 	return answer
+}
+
+// Since we are answering we need to match the remote PayloadType
+func getPayloadType(m webrtc.MediaEngine, codecType webrtc.RTPCodecType, codecName string) uint8 {
+	for _, codec := range m.GetCodecsByKind(codecType) {
+		if codec.Name == codecName {
+			return codec.PayloadType
+		}
+	}
+	panic(fmt.Sprintf("Remote peer does not support %s", codecName))
 }

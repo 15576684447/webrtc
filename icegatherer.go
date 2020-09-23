@@ -51,8 +51,7 @@ func (api *API) NewICEGatherer(opts ICEGatherOptions) (*ICEGatherer, error) {
 		gatherPolicy:     opts.ICEGatherPolicy,
 		validatedServers: validatedServers,
 		api:              api,
-		log:				log.InitLogger("ice"),
-		//log:              api.settingEngine.LoggerFactory.NewLogger("ice"),
+		log:              api.settingEngine.LoggerFactory.NewLogger("ice"),
 	}, nil
 }
 
