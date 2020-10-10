@@ -71,6 +71,10 @@ func (b *Buffer) Write(packet []byte) (n int, err error) {
 		// If so, close the notify channel and make a new one.
 		// This effectively behaves like a broadcast, waking up any blocked goroutines.
 		// We close after we release the lock to reduce contention.
+		//todo: 摘除旧的chan，新建新的chan，之后关闭被摘除的旧的chan
+		// 关闭chan时，所有block的等待都会被唤醒，巧妙应用了管道的关闭特性
+		// 顺序不能乱，一定是 [摘除chan -> 新建chan替换 -> close被摘除的chan -> 广播唤醒read端的chan阻塞等待]
+		// 每次写入都重复上述管道更替，实现write/read异步唤醒
 		notify = b.notify
 		b.notify = make(chan struct{})
 
@@ -85,6 +89,7 @@ func (b *Buffer) Write(packet []byte) (n int, err error) {
 
 	// Actually close the notify channel down here.
 	if notify != nil {
+		//todo: 关闭chan，实现广播唤醒chan等待
 		close(notify)
 	}
 
@@ -136,6 +141,7 @@ func (b *Buffer) Read(packet []byte) (n int, err error) {
 
 		// Get the current notify channel.
 		// This will be closed when there is new data available, waking us up.
+		//todo: 每次read完毕后，都需重新更新notify chan => 为了实现广播效应，唤醒所有阻塞的chan，conn在将数据写入buffer后，会close chan(实现广播唤醒)
 		notify := b.notify
 
 		// Set the subs marker, telling the writer we're waiting.
@@ -143,6 +149,8 @@ func (b *Buffer) Read(packet []byte) (n int, err error) {
 		b.mutex.Unlock()
 
 		// Wake for the broadcast.
+		//todo: 从endpoint的buffer中读取时，会在此处阻塞
+		// 直到下次conn有数据写入endpoint的buffer中，并关闭notify chan，然后新建一个(close chan会触发一次broadcast，唤醒所有阻塞)
 		select {
 		case <-b.readDeadline.Done():
 			return 0, &netError{errTimeout, true, true}

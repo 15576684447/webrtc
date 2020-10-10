@@ -678,6 +678,7 @@ func (a *Agent) setSelectedPair(p *candidatePair) {
 	a.closeMulticastConn()
 
 	// Signal connected
+	//todo: 此处作为一个重要的chan信号，当第一次setSelectedPair后，就会关闭chan，并触发connect函数返回，继续之后的mux/rtp/rtcp等操作
 	a.onConnectedOnce.Do(func() { close(a.onConnected) })
 }
 

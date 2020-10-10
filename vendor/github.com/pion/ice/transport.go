@@ -59,8 +59,8 @@ func (a *Agent) connect(ctx context.Context, isControlling bool, remoteUfrag, re
 	case <-a.done:
 		return nil, a.getErr()
 	case <-ctx.Done():
-		// TODO: Stop connectivity checks?
 		return nil, ErrCanceledByCaller
+		//todo: ice建连成功后，就会返回可用的conn，然后继续mux，rtp，rtcp等建连
 	case <-a.onConnected:
 	}
 

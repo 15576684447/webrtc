@@ -94,9 +94,11 @@ func main() {
 		codec := track.Codec()
 		if codec.Name == webrtc.Opus {
 			fmt.Println("Got Opus track, saving to disk as output.opus (48 kHz, 2 channels)")
+			//音频track到来后，触发音频文件写函数，之后便进入for循环一直阻塞读track
 			saveToDisk(oggFile, track)
 		} else if codec.Name == webrtc.VP8 {
 			fmt.Println("Got VP8 track, saving to disk as output.ivf")
+			//视频track到来后，触发视频文件写函数，之后便进入for循环一直阻塞读track
 			saveToDisk(ivfFile, track)
 		}
 	})

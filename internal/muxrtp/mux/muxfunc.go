@@ -57,9 +57,7 @@ func MatchZRTP(b []byte) bool {
 
 // MatchDTLS is a MatchFunc that accepts packets with the first byte in [20..63]
 // as defied in RFC7983
-func MatchDTLS(b []byte) bool {
-	return MatchRange(20, 63)(b)
-}
+var MatchDTLS = MatchRange(20, 63)
 
 // MatchTURN is a MatchFunc that accepts packets with the first byte in [64..79]
 // as defied in RFC7983
@@ -67,9 +65,9 @@ func MatchTURN(b []byte) bool {
 	return MatchRange(64, 79)(b)
 }
 
-// MatchSRTPOrSRTCP is a MatchFunc that accepts packets with the first byte in [128..191]
+// MatchRTPOrRTCP is a MatchFunc that accepts packets with the first byte in [128..191]
 // as defied in RFC7983
-func MatchSRTPOrSRTCP(b []byte) bool {
+func MatchRTPOrRTCP(b []byte) bool {
 	return MatchRange(128, 191)(b)
 }
 
@@ -92,20 +90,10 @@ func isRTCP(buf []byte) bool {
 
 // MatchRTP is a MatchFunc that only matches SRTP and not SRTCP
 func MatchRTP(buf []byte) bool {
-	return MatchSRTPOrSRTCP(buf) && !isRTCP(buf)
-}
-
-// MatchRTCP is a MatchFunc that only matches SRTCP and not SRTP
-func MatchRTCP(buf []byte) bool {
-	return MatchSRTPOrSRTCP(buf) && isRTCP(buf)
-}
-
-// MatchSRTP is a MatchFunc that only matches SRTP and not SRTCP
-func MatchSRTP(buf []byte) bool {
-	return MatchSRTPOrSRTCP(buf) && !isRTCP(buf)
+	return MatchRTPOrRTCP(buf) && !isRTCP(buf)
 }
 
 // MatchSRTCP is a MatchFunc that only matches SRTCP and not SRTP
-func MatchSRTCP(buf []byte) bool {
-	return MatchSRTPOrSRTCP(buf) && isRTCP(buf)
+func MatchRTCP(buf []byte) bool {
+	return MatchRTPOrRTCP(buf) && isRTCP(buf)
 }

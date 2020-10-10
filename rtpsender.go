@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"webrtc/webrtc/internal/muxrtp"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -14,10 +15,12 @@ import (
 
 // RTPSender allows an application to control how a given Track is encoded and transmitted to a remote peer
 type RTPSender struct {
-	track          *Track
-	rtcpReadStream *srtp.ReadStreamSRTCP
+	track             *Track
+	rtcpReadStream    *srtp.ReadStreamSRTCP
+	muxRtcpReadStream *muxrtp.ReadStreamRTCP
 
-	transport *DTLSTransport
+	transport      *DTLSTransport
+	DisableEncrypt bool
 
 	// TODO(sgotti) remove this when in future we'll avoid replacing
 	// a transceiver sender since we can just check the
@@ -86,19 +89,33 @@ func (r *RTPSender) Track() *Track {
 func (r *RTPSender) Send(parameters RTPSendParameters) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
+	//dtls开关
+	r.DisableEncrypt = parameters.DisableEncrypt
 	if r.hasSent() {
 		return fmt.Errorf("Send has already been called")
 	}
-	//获取rtcp session
-	srtcpSession, err := r.transport.getSRTCPSession()
-	if err != nil {
-		return err
-	}
-	//获取对应MediaStream
-	r.rtcpReadStream, err = srtcpSession.OpenReadStream(parameters.Encodings.SSRC)
-	if err != nil {
-		return err
+	if parameters.DisableEncrypt { //无需dtls加密，直接传输rtp/rtcp
+		//todo:同时支持rtp/rtcp加密与不加密
+		rtcpSession, err := r.transport.getRTCPSession()
+		if err != nil {
+			return err
+		}
+		//获取对应MediaStream
+		r.muxRtcpReadStream, err = rtcpSession.OpenReadStream(parameters.Encodings.SSRC)
+		if err != nil {
+			return err
+		}
+	} else {
+		//获取rtcp session
+		srtcpSession, err := r.transport.getSRTCPSession()
+		if err != nil {
+			return err
+		}
+		//获取对应MediaStream
+		r.rtcpReadStream, err = srtcpSession.OpenReadStream(parameters.Encodings.SSRC)
+		if err != nil {
+			return err
+		}
 	}
 
 	r.track.mu.Lock()
@@ -135,6 +152,10 @@ func (r *RTPSender) Stop() error {
 	close(r.stopCalled)
 
 	if r.hasSent() {
+		//todo:同时支持rtp/rtcp加密与不加密
+		if r.DisableEncrypt {
+			return r.muxRtcpReadStream.Close()
+		}
 		return r.rtcpReadStream.Close()
 	}
 
@@ -145,6 +166,10 @@ func (r *RTPSender) Stop() error {
 func (r *RTPSender) Read(b []byte) (n int, err error) {
 	select {
 	case <-r.sendCalled:
+		//todo:同时支持rtp/rtcp加密与不加密
+		if r.DisableEncrypt {
+			return r.muxRtcpReadStream.Read(b)
+		}
 		return r.rtcpReadStream.Read(b)
 	case <-r.stopCalled:
 		return 0, io.ErrClosedPipe
@@ -173,6 +198,20 @@ func (r *RTPSender) SendRTP(header *rtp.Header, payload []byte) (int, error) {
 	case <-r.stopCalled:
 		return 0, fmt.Errorf("RTPSender has been stopped")
 	case <-r.sendCalled:
+		//todo:同时支持rtp/rtcp加密与不加密
+		if r.DisableEncrypt {
+			rtpSession, err := r.transport.getRTPSession()
+			if err != nil {
+				return 0, err
+			}
+
+			writeStream, err := rtpSession.OpenWriteStream()
+			if err != nil {
+				return 0, err
+			}
+
+			return writeStream.WriteRTP(header, payload)
+		}
 		srtpSession, err := r.transport.getSRTPSession()
 		if err != nil {
 			return 0, err

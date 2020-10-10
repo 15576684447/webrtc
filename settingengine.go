@@ -52,6 +52,7 @@ type SettingEngine struct {
 	disableCertificateFingerprintVerification bool
 	disableSRTPReplayProtection               bool
 	disableSRTCPReplayProtection              bool
+	disableEncrypt                            bool
 	vnet                                      *vnet.Net
 	LoggerFactory                             logging.LoggerFactory
 }

@@ -808,12 +808,12 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	detectedPlanB := descriptionIsPlanB(pc.RemoteDescription())
 
 	/*
-	TODO:RTPTransceiver意义及其与track的关系
-		1、每个RTPTransceiver对应sdp中的一个<m=...>标签
-		2、对于Plan B模式，本地要发送的多个相同媒体类型的local track（a=ssrc不同）可能会属于同一个mLine，
-			因此，RTPTransceiver包含多个RtpSender的向量 ，每个RtpSender会存储其中一个local track。
-		3、对于Unified Plan模式，RTPTransceiver的RtpSender向量实质上只会存在一个RtpSender。
-		4、RTPTransceiver还包含一个RtpReceiver，用于保存remote track。
+		TODO:RTPTransceiver意义及其与track的关系
+			1、每个RTPTransceiver对应sdp中的一个<m=...>标签
+			2、对于Plan B模式，本地要发送的多个相同媒体类型的local track（a=ssrc不同）可能会属于同一个mLine，
+				因此，RTPTransceiver包含多个RtpSender的向量 ，每个RtpSender会存储其中一个local track。
+			3、对于Unified Plan模式，RTPTransceiver的RtpSender向量实质上只会存在一个RtpSender。
+			4、RTPTransceiver还包含一个RtpReceiver，用于保存remote track。
 	*/
 	//确定是否存在对应可用的transceiver，如果不存在，则新建一个
 	if !weOffer && !detectedPlanB {
@@ -836,14 +836,14 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 			}
 			//根据midValue匹配
 			/*
-			TODO:
-				对于每个<m=...>，对应一个transceiver，首先从已有的transceiver中查找是否有可复用的
-				可复用的条件为:
-					1、transceiver类型与<m=...>类型一致，如都为audio/video
-					2、transceiver中Sender的track为nil，即未被其他track占用
-					3、transceiver的direction未被设置为send，即如果添加发送track，就需要设置direction为可发送
-					4、transceiver状态不为stop
-			 */
+				TODO:
+					对于每个<m=...>，对应一个transceiver，首先从已有的transceiver中查找是否有可复用的
+					可复用的条件为:
+						1、transceiver类型与<m=...>类型一致，如都为audio/video
+						2、transceiver中Sender的track为nil，即未被其他track占用
+						3、transceiver的direction未被设置为send，即如果添加发送track，就需要设置direction为可发送
+						4、transceiver状态不为stop
+			*/
 			t, localTransceivers = findByMid(midValue, localTransceivers)
 			if t == nil {
 				//进一步再根据RTPCodecType(audio/video)和传输方向匹配
@@ -907,7 +907,7 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
 	if (weOffer && remoteIsLite == pc.api.settingEngine.candidates.ICELite) || (remoteIsLite && !pc.api.settingEngine.candidates.ICELite) {
 		iceRole = ICERoleControlling
 	}
-	pc.log.Debugf("*************************SetRemoteDescription: weOffer=%v, remoteIsLite=%v, pc.api.settingEngine.candidates.ICELite=%v, iceRole=%s\n", weOffer, remoteIsLite, pc.api.settingEngine.candidates.ICELite, iceRole.String() )
+	pc.log.Debugf("*************************SetRemoteDescription: weOffer=%v, remoteIsLite=%v, pc.api.settingEngine.candidates.ICELite=%v, iceRole=%s\n", weOffer, remoteIsLite, pc.api.settingEngine.candidates.ICELite, iceRole.String())
 	// Start the networking in a new routine since it will block until
 	// the connection is actually established.
 	pc.log.Debugf("SetRemoteDescription: startTransports\n")
@@ -933,14 +933,15 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 			所以读取track数据就等同于从对应ssrc的rtp Stream的buffer中读取数据，session将数据写入对应ssrc的stream后就会通知对应ssrc的track来读取
 			session与stream的对应关系为: 一个rtp/rtcp session可对应多个rtp/rtcp stream(如果存在多个ssrc)
 			session只是一个中间产物，stream才是最终操作的句柄对象，session将数据写入stream后会通过chan通知对应track来读取数据
-	 */
+	*/
 	/*
 		TODO:Sender是在何时使用的
 			要在某个pc上发送某个track，只要将该track添加到该pc即可
 			在pc上添加track的过程，就是将pc上对应Transceiver的RTPSender添加到该track的activeSenders的过程
 			最后当track收到数据后，就会遍历其activeSenders数组，并依次发送track数据到各个RTPSender
-	 */
+	*/
 	err := receiver.Receive(RTPReceiveParameters{
+		DisableEncrypt: pc.api.settingEngine.disableEncrypt,
 		Encodings: RTPDecodingParameters{
 			RTPCodingParameters{SSRC: incoming.ssrc},
 		}})
@@ -957,6 +958,7 @@ func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPRece
 	receiver.Track().label = incoming.label
 	receiver.Track().mu.Unlock()
 
+	//todo: 此函数只会触发一次，在该track有数据到来时，触发一次onTrack，并不会重复触发，所以在OnTrack函数中需要调用for循环来持续读取track
 	go func() {
 		//从buffer中读取一个pkt来决定其payload类型
 		if err = receiver.Track().determinePayloadType(); err != nil {
@@ -1062,12 +1064,13 @@ TODO:这里有一个特别细微但是关键的细节
 	所以上述的结果就是将Sender都存放到了同一个track的activeSenders
 	!!!这里实现的核心功能为: 将指向相同track的所有RTPSender放到该track的activeSenders中
 	那么该track在发送数据时，只需要遍历其下的所有activeSenders，然后逐个发送即可
- */
+*/
 func (pc *PeerConnection) startRTPSenders(currentTransceivers []*RTPTransceiver) {
 	for _, transceiver := range currentTransceivers {
 		// TODO(sgotti) when in future we'll avoid replacing a transceiver sender just check the transceiver negotiation status
 		if transceiver.Sender() != nil && transceiver.Sender().isNegotiated() && !transceiver.Sender().hasSent() {
 			err := transceiver.Sender().Send(RTPSendParameters{
+				DisableEncrypt: pc.api.settingEngine.disableEncrypt,
 				Encodings: RTPEncodingParameters{
 					RTPCodingParameters{
 						SSRC:        transceiver.Sender().track.SSRC(),
@@ -1280,7 +1283,7 @@ TODO:
 	首先查看是否存在可以被复用RTPTransceiver
 	1、如果存在可用的RTPTransceiver，即其媒体类型与track相同，且RTPSender没有被使用，则该RTPTransceiver可以被复用
 	2、否则新建可以新的RTPTransceiver
- */
+*/
 func (pc *PeerConnection) AddTrack(track *Track) (*RTPSender, error) {
 	if pc.isClosed.get() {
 		return nil, &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
@@ -1606,6 +1609,7 @@ func (pc *PeerConnection) Close() error {
 
 // NewTrack Creates a new Track
 func (pc *PeerConnection) NewTrack(payloadType uint8, ssrc uint32, id, label string) (*Track, error) {
+	//这里只能使用mediaEngine中已经注册的codec，所以在注册mediaEngine前，应该需要清楚自己需要的媒体能力
 	codec, err := pc.api.mediaEngine.getCodec(payloadType)
 	if err != nil {
 		return nil, err
@@ -1777,11 +1781,12 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 		2、DTLS建连成功: 客户端获取服务器的证书公钥，并使用公钥加密对称密钥发送给对端，于是双方获取对方的对称加密密钥
 		3、RTP数据包使用对称加密密钥加密成SRTP后，通过ICE发送给对端，对端解密为RTP
 		4、获取对端的SRTP，使用对称加密密钥解密为RTP数据包
-	 */
+	*/
 	pc.log.Debugf("startTransports: pc.dtlsTransport.Start\n")
 	err = pc.dtlsTransport.Start(DTLSParameters{
-		Role:         dtlsRole,
-		Fingerprints: []DTLSFingerprint{{Algorithm: fingerprintHash, Value: fingerprint}},
+		DisableEncrypt: pc.api.settingEngine.disableEncrypt,
+		Role:           dtlsRole,
+		Fingerprints:   []DTLSFingerprint{{Algorithm: fingerprintHash, Value: fingerprint}},
 	})
 	pc.updateConnectionState(pc.ICEConnectionState(), pc.dtlsTransport.State())
 	if err != nil {
@@ -1793,31 +1798,31 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDescription) {
 	currentTransceivers := append([]*RTPTransceiver{}, pc.GetTransceivers()...)
 	/*
-	a=group:BUNDLE audio video data
-	a=msid-semantic: WMS h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C
-	m=audio 9 UDP/TLS/RTP/SAVPF 111 103 104 9 0 8 106 105 13 126
-	a=mid:audio
-	a=ssrc:18509423 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C 15598a91-caf9-4fff-a28f-3082310b2b7a
-	m=video 9 UDP/TLS/RTP/SAVPF 100 101 107 116 117 96 97 99 98
-	a=mid:video
-	a=ssrc:3463951252 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C ead4b4e9-b650-4ed5-86f8-6f5f5806346d
-	m=application 9 DTLS/SCTP 5000
-	a=mid:data
-	TODO: 解析track
-		对于Plan B模式，一个mLine对应若干个类型相同的track，属于一对多
-		对于Unified Plan模式，一个mLine对应一个track，属于一对一
-		每个<a=ssrc:ssrc_id msid:mediaStreamId trackId>中，指定了每个track的媒体源、所属mediaStream以及其trackId
+		a=group:BUNDLE audio video data
+		a=msid-semantic: WMS h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C
+		m=audio 9 UDP/TLS/RTP/SAVPF 111 103 104 9 0 8 106 105 13 126
+		a=mid:audio
+		a=ssrc:18509423 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C 15598a91-caf9-4fff-a28f-3082310b2b7a
+		m=video 9 UDP/TLS/RTP/SAVPF 100 101 107 116 117 96 97 99 98
+		a=mid:video
+		a=ssrc:3463951252 msid:h1aZ20mbQB0GSsq0YxLfJmiYWE9CBfGch97C ead4b4e9-b650-4ed5-86f8-6f5f5806346d
+		m=application 9 DTLS/SCTP 5000
+		a=mid:data
+		TODO: 解析track
+			对于Plan B模式，一个mLine对应若干个类型相同的track，属于一对多
+			对于Unified Plan模式，一个mLine对应一个track，属于一对一
+			每个<a=ssrc:ssrc_id msid:mediaStreamId trackId>中，指定了每个track的媒体源、所属mediaStream以及其trackId
 	*/
 	trackDetails := trackDetailsFromSDP(pc.log, remoteDesc.parsed)
 	if isRenegotiation {
 		/*
-		TODO:重协商做了啥
-			重协商主要针对remote track做了调整，remote track信息保存在RTPTransceiver的RTPReceiver中
-			1、如果当前RTPTransceiver的RTPReceiver绑定了track，则查看该track是否仍然存在(ssrc为唯一id)
-				1.1、track仍然使用中，更新该track信息，保留使用
-				1.2、track已经不再使用，停止并新建一个替换之
-			总之就是删除不再使用的RTPReceiver，保留并更新正在使用的RTPReceiver！！！
-		 */
+			TODO:重协商做了啥
+				重协商主要针对remote track做了调整，remote track信息保存在RTPTransceiver的RTPReceiver中
+				1、如果当前RTPTransceiver的RTPReceiver绑定了track，则查看该track是否仍然存在(ssrc为唯一id)
+					1.1、track仍然使用中，更新该track信息，保留使用
+					1.2、track已经不再使用，停止并新建一个替换之
+				总之就是删除不再使用的RTPReceiver，保留并更新正在使用的RTPReceiver！！！
+		*/
 		//检查RTPTransceiver的RTPReceiver，确认是否仍在使用中，删除不再使用的
 		for _, t := range currentTransceivers {
 			//空的Receiver
@@ -1830,8 +1835,8 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 			//该Receiver仍有对应的track存在，更新属性即可
 			if _, ok := trackDetails[ssrc]; ok {
 				incoming := trackDetails[ssrc]
-				t.Receiver().Track().id = incoming.id//track_id
-				t.Receiver().Track().label = incoming.label//stream_id
+				t.Receiver().Track().id = incoming.id       //track_id
+				t.Receiver().Track().label = incoming.label //stream_id
 				t.Receiver().Track().mu.Unlock()
 				continue
 			}

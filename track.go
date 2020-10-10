@@ -175,7 +175,7 @@ func NewTrack(payloadType uint8, ssrc uint32, id, label string, codec *RTPCodec)
 	}
 	//指定track的包装器，发送数据包时使用
 	packetizer := rtp.NewPacketizer(
-		rtpOutboundMTU,
+		rtpOutboundMTU,//限制track包大小
 		payloadType,
 		ssrc,
 		codec.Payloader,
