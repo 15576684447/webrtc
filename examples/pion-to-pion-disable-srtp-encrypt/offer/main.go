@@ -2,13 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"math/rand"
 	"net/http"
+	"os"
 	"time"
 	"webrtc/webrtc"
 	"webrtc/webrtc/examples/internal/signal"
+	"webrtc/webrtc/pkg/media"
+	"webrtc/webrtc/pkg/media/ivfreader"
 )
 
 func main() {
@@ -37,6 +43,58 @@ func main() {
 		panic(err)
 	}
 
+	// Create a video track
+	rand.Seed(time.Now().Unix())
+	videoSsrc := rand.Uint32()
+	videoTrack, err := peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, videoSsrc, "video", "pion")
+	if err != nil {
+		panic(err)
+	}
+	if _, err = peerConnection.AddTrack(videoTrack); err != nil {
+		panic(err)
+	}
+
+	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+		receiveTrack(track)
+	})
+
+	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(context.Background())
+	go func() {
+		// Open a IVF file and start reading using our IVFReader
+		file, ivfErr := os.Open("output.ivf")
+		if ivfErr != nil {
+			panic(ivfErr)
+		}
+
+		ivf, header, ivfErr := ivfreader.NewWith(file)
+		if ivfErr != nil {
+			panic(ivfErr)
+		}
+
+		// Wait for connection established
+		<-iceConnectedCtx.Done()
+
+		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
+		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
+		sleepTime := time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000)
+		for {
+			frame, _, ivfErr := ivf.ParseNextFrame()
+			if ivfErr == io.EOF {
+				fmt.Printf("All frames parsed and sent")
+				os.Exit(0)
+			}
+
+			if ivfErr != nil {
+				panic(ivfErr)
+			}
+
+			time.Sleep(sleepTime)
+			if ivfErr = videoTrack.WriteSample(media.Sample{Data: frame, Samples: 90000}); ivfErr != nil {
+				panic(ivfErr)
+			}
+		}
+	}()
+
 	// Create a datachannel with label 'data'
 	dataChannel, err := peerConnection.CreateDataChannel("data", nil)
 	if err != nil {
@@ -47,6 +105,9 @@ func main() {
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("ICE Connection State has changed: %s\n", connectionState.String())
+		if connectionState == webrtc.ICEConnectionStateConnected {
+			iceConnectedCtxCancel()
+		}
 	})
 
 	// Register channel opening handling
@@ -75,7 +136,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
+	fmt.Printf("send offer: %s\n", offer.SDP)
 	// Sets the LocalDescription, and starts our UDP listeners
 	err = peerConnection.SetLocalDescription(offer)
 	if err != nil {
@@ -84,6 +145,7 @@ func main() {
 
 	// Exchange the offer for the answer
 	answer := mustSignalViaHTTP(offer, *addr)
+	fmt.Printf("get answer: %s\n", answer.SDP)
 
 	// Apply the answer as the remote description
 	err = peerConnection.SetRemoteDescription(answer)
@@ -121,4 +183,29 @@ func mustSignalViaHTTP(offer webrtc.SessionDescription, address string) webrtc.S
 	}
 
 	return answer
+}
+
+func receiveTrack(remoteTrack *webrtc.Track) {
+	mediaType := "unknownMediaType"
+	if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+		mediaType = "audio"
+	} else if remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
+		mediaType = "video"
+	}
+	payloadType := remoteTrack.PayloadType()
+	fmt.Printf("On %s track\n", mediaType)
+	totalPktNum, totalPktBytes, avrPktBytes := 0, 0, 0
+	for {
+		rtpPacket, err := remoteTrack.ReadRTP()
+		if err != nil {
+			panic(err)
+		}
+		totalPktNum++
+		totalPktBytes += len(rtpPacket.Raw)
+		if totalPktNum%50 == 0 {
+			avrPktBytes = totalPktBytes / totalPktNum
+			fmt.Printf("%s track, payload=%d, totalPktNum=%d, totalPktBytes=%d, avrPktBytes=%d\n", mediaType, payloadType, totalPktNum, totalPktBytes, avrPktBytes)
+		}
+
+	}
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"time"
 	"webrtc/webrtc"
@@ -35,6 +37,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Create a video track
+	rand.Seed(time.Now().Unix())
+	videoSsrc := rand.Uint32()
+	videoTrack, err := peerConnection.NewTrack(webrtc.DefaultPayloadTypeVP8, videoSsrc, "video", "pion")
+	if err != nil {
+		panic(err)
+	}
+	if _, err = peerConnection.AddTrack(videoTrack); err != nil {
+		panic(err)
+	}
+
+	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+		if track.Kind() == webrtc.RTPCodecTypeVideo {
+			receiveTrack(track, videoTrack, videoSsrc)
+		}
+	})
 
 	// Set the handler for ICE connection state
 	// This will notify you when the peer has connected/disconnected
@@ -74,6 +93,8 @@ func main() {
 	// Wait for the remote SessionDescription
 	offer := <-offerChan
 
+	fmt.Printf("get offer: %s\n", offer.SDP)
+
 	err = peerConnection.SetRemoteDescription(offer)
 	if err != nil {
 		panic(err)
@@ -93,6 +114,8 @@ func main() {
 
 	// Send the answer
 	answerChan <- answer
+
+	fmt.Printf("send answer: %s\n", answer.SDP)
 
 	// Block forever
 	select {}
@@ -140,4 +163,36 @@ func mustSignalViaHTTP(address string) (chan webrtc.SessionDescription, chan web
 	fmt.Println("Listening on", address)
 
 	return offerOut, answerIn
+}
+
+func receiveTrack(remoteTrack *webrtc.Track, localTrack *webrtc.Track, targetSsrc uint32) {
+	mediaType := "unknownMediaType"
+	if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+		mediaType = "audio"
+	} else if remoteTrack.Kind() == webrtc.RTPCodecTypeVideo {
+		mediaType = "video"
+	}
+	payloadType := remoteTrack.PayloadType()
+	fmt.Printf("On %s track\n", mediaType)
+	totalPktNum, totalPktBytes, avrPktBytes := 0, 0, 0
+	for {
+		rtpPacket, err := remoteTrack.ReadRTP()
+		if err != nil {
+			panic(err)
+		}
+		totalPktNum++
+		totalPktBytes += len(rtpPacket.Raw)
+		if totalPktNum%50 == 0 {
+			avrPktBytes = totalPktBytes / totalPktNum
+			fmt.Printf("%s track, payload=%d, totalPktNum=%d, totalPktBytes=%d, avrPktBytes=%d\n", mediaType, payloadType, totalPktNum, totalPktBytes, avrPktBytes)
+		}
+		//发送到peer
+		//将rtpPkt返回给peer端时，需要修改其中的ssrc为协商的ssrc，否则对端不认识该ssrc对应的媒体
+		rtpPacket.SSRC = targetSsrc
+		binary.BigEndian.PutUint32(rtpPacket.Raw[8:12], targetSsrc)
+		if err := localTrack.WriteRTP(rtpPacket); err != nil {
+			panic(err)
+		}
+
+	}
 }
