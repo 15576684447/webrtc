@@ -240,3 +240,8 @@ func (e *SettingEngine) DisableSRTPReplayProtection(isDisabled bool) {
 func (e *SettingEngine) DisableSRTCPReplayProtection(isDisabled bool) {
 	e.disableSRTCPReplayProtection = isDisabled
 }
+
+//DisableSRTPEncrypt disable SRTP/SRTCP Encrypt
+func (e *SettingEngine) DisableSRTPEncrypt(isDisabled bool) {
+	e.disableEncrypt = isDisabled
+}

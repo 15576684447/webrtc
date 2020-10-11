@@ -1,11 +1,10 @@
 package muxrtp
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"sync"
-
-	"code.byted.org/gopkg/logs"
 )
 
 const (
@@ -94,16 +93,16 @@ func (s *session) start(child streamSession) error {
 			i, err := s.nextConn.Read(b)
 			if err != nil {
 				if err != io.EOF {
-					logs.Errorf("s.nextConn.Read => %s", err.Error())
+					fmt.Printf("ERROR: s.nextConn.Read => %s", err.Error())
 				}
 				return
 			}
 			if i == 0 {
-				logs.Warnf("s.nextConn.Read = 0")
+				fmt.Print("WARNING: s.nextConn.Read = 0")
 				continue
 			}
 			if err = child.handle(b[:i]); err != nil {
-				logs.Warnf("session.start %v", err)
+				fmt.Printf("WARNING: session.start %v", err)
 			}
 		}
 	}()

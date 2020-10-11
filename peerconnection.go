@@ -1123,17 +1123,19 @@ func (pc *PeerConnection) startSCTP() {
 
 // drainSRTP pulls and discards RTP/RTCP packets that don't match any a:ssrc lines
 // If the remote SDP was only one media section the ssrc doesn't have to be explicitly declared
+//todo: 拉取并丢弃那些不匹配的ssrc媒体数据。如果sdp中只有一项media section，则无需明确申明
 func (pc *PeerConnection) drainSRTP() {
 	handleUndeclaredSSRC := func(ssrc uint32) bool {
 		if remoteDescription := pc.RemoteDescription(); remoteDescription != nil {
 			if len(remoteDescription.parsed.MediaDescriptions) == 1 {
 				onlyMediaSection := remoteDescription.parsed.MediaDescriptions[0]
+				//sdp只有一项media section，无需明确申明ssrc项
 				for _, a := range onlyMediaSection.Attributes {
 					if a.Key == ssrcStr {
 						return false
 					}
 				}
-
+				//构造track与transceiver，并开启接收UndeclaredSSR
 				incoming := trackDetails{
 					ssrc: ssrc,
 					kind: RTPCodecTypeVideo,
@@ -1164,7 +1166,8 @@ func (pc *PeerConnection) drainSRTP() {
 				pc.log.Warnf("drainSRTP failed to open SrtpSession: %v", err)
 				return
 			}
-
+			//每次收到新的 undeclared ssrc则返回一次，否则一直阻塞
+			//todo:如果是sdp中已有的ssrc，则在startReceiver时，就会构建Stream；只有不在sdp中申明的ssrc到来时，才会在此触发，并执行 handleUndeclaredSSRC，丢弃其rtp/rtcp包
 			_, ssrc, err := srtpSession.AcceptStream()
 			if err != nil {
 				pc.log.Warnf("Failed to accept RTP %v", err)
@@ -1184,8 +1187,84 @@ func (pc *PeerConnection) drainSRTP() {
 				pc.log.Warnf("drainSRTP failed to open SrtcpSession: %v", err)
 				return
 			}
-
+			//每次收到新的 undeclared ssrc则返回一次，否则一直阻塞
+			//todo:如果是sdp中已有的ssrc，则在startReceiver时，就会构建Stream；只有不在sdp中申明的ssrc到来时，才会在此触发，并执行 handleUndeclaredSSRC，丢弃其rtp/rtcp包
 			_, ssrc, err := srtcpSession.AcceptStream()
+			if err != nil {
+				pc.log.Warnf("Failed to accept RTCP %v", err)
+				return
+			}
+			pc.log.Warnf("Incoming unhandled RTCP ssrc(%d), OnTrack will not be fired", ssrc)
+		}
+	}()
+}
+
+func (pc *PeerConnection) drainRTP() {
+	handleUndeclaredSSRC := func(ssrc uint32) bool {
+		if remoteDescription := pc.RemoteDescription(); remoteDescription != nil {
+			if len(remoteDescription.parsed.MediaDescriptions) == 1 {
+				onlyMediaSection := remoteDescription.parsed.MediaDescriptions[0]
+				//sdp只有一项media section，无需明确申明ssrc项
+				for _, a := range onlyMediaSection.Attributes {
+					if a.Key == ssrcStr {
+						return false
+					}
+				}
+				//构造track与transceiver，并开启接收UndeclaredSSR
+				incoming := trackDetails{
+					ssrc: ssrc,
+					kind: RTPCodecTypeVideo,
+				}
+				if onlyMediaSection.MediaName.Media == RTPCodecTypeAudio.String() {
+					incoming.kind = RTPCodecTypeAudio
+				}
+
+				t, err := pc.AddTransceiverFromKind(incoming.kind, RtpTransceiverInit{
+					Direction: RTPTransceiverDirectionSendrecv,
+				})
+				if err != nil {
+					pc.log.Warnf("Could not add transceiver for remote SSRC %d: %s", ssrc, err)
+					return false
+				}
+				pc.startReceiver(incoming, t.Receiver())
+				return true
+			}
+		}
+
+		return false
+	}
+
+	go func() {
+		for {
+			rtpSession, err := pc.dtlsTransport.getRTPSession()
+			if err != nil {
+				pc.log.Warnf("drainRTP failed to open rtpSession: %v", err)
+				return
+			}
+			//每次收到新的 undeclared ssrc则返回一次，否则一直阻塞
+			//todo:如果是sdp中已有的ssrc，则在startReceiver时，就会构建Stream；只有不在sdp中申明的ssrc到来时，才会在此触发，并执行 handleUndeclaredSSRC，丢弃其rtp/rtcp包
+			_, ssrc, err := rtpSession.AcceptStream()
+			if err != nil {
+				pc.log.Warnf("Failed to accept RTP %v", err)
+				return
+			}
+
+			if !handleUndeclaredSSRC(ssrc) {
+				pc.log.Warnf("Incoming unhandled RTP ssrc(%d), OnTrack will not be fired", ssrc)
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			rtcpSession, err := pc.dtlsTransport.getRTCPSession()
+			if err != nil {
+				pc.log.Warnf("drainRTP failed to open rtcpSession: %v", err)
+				return
+			}
+			//每次收到新的 undeclared ssrc则返回一次，否则一直阻塞
+			//todo:如果是sdp中已有的ssrc，则在startReceiver时，就会构建Stream；只有不在sdp中申明的ssrc到来时，才会在此触发，并执行 handleUndeclaredSSRC，丢弃其rtp/rtcp包
+			_, ssrc, err := rtcpSession.AcceptStream()
 			if err != nil {
 				pc.log.Warnf("Failed to accept RTCP %v", err)
 				return
@@ -1863,7 +1942,13 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 	//datachannel在第一次startRTP后就建立完毕(isRenegotiation=false作为第一次调用startRTP的标志)
 	//之后的调用主要是重协商操作，所以之后的isRenegotiation=true
 	if !isRenegotiation {
-		pc.drainSRTP()
+		//todo: 同时支持rtp/rtcp加密与不加密
+		//drainRTP/drainSRTP专门用于处理接收sdp中undeclared ssrc对应的rtp/rtcp包数据
+		if pc.api.settingEngine.disableEncrypt {
+			pc.drainRTP()
+		} else {
+			pc.drainSRTP()
+		}
 		//m=application 使用datachannel传输
 		if haveApplicationMediaSection(remoteDesc.parsed) {
 			pc.startSCTP()

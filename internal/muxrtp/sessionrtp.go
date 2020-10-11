@@ -110,7 +110,7 @@ func (s *SessionRTP) handle(buf []byte) error {
 	if err := h.Unmarshal(buf); err != nil {
 		return err
 	}
-
+	//todo: 这里是一个关键逻辑，处理数据时，如果收到新的ssrc，则通知上层收到newStream
 	r, isNew := s.session.getOrCreateReadStream(h.SSRC, s, newReadStreamRTP)
 	if r == nil {
 		return nil // Session has been closed
