@@ -654,7 +654,7 @@ func TestOnICEGatheringStateChange(t *testing.T) {
 			)
 		}
 
-		switch s {
+		switch s { // nolint:exhaustive
 		case ICEGathererStateClosed:
 			close(seenClosed)
 			return
@@ -838,7 +838,7 @@ func TestMulticastDNSCandidates(t *testing.T) {
 	defer report()
 
 	s := SettingEngine{}
-	s.GenerateMulticastDNSCandidates(true)
+	s.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
 
 	pcOffer, pcAnswer, err := NewAPI(WithSettingEngine(s)).newPair(Configuration{})
 	assert.NoError(t, err)

@@ -202,6 +202,12 @@ Check out the **[contributing wiki](https://github.com/pion/webrtc/wiki/Contribu
 * [yoko(q191201771)](https://github.com/q191201771)
 * [Joshua Obasaju](https://github.com/obasajujoshua31)
 * [Mission Liao](https://github.com/mission-liao)
+* [Hanjun Kim](https://github.com/hallazzang)
+* [ZHENK](https://github.com/scorpionknifes)
+* [Rahul Nakre](https://github.com/rahulnakre)
+* [OrlandoCo](https://github.com/OrlandoCo)
+* [Assad Obaid](https://github.com/assadobaid)
+* [Jamie Good](https://github.com/jamiegood) - *Bug fix in jsfiddle example*
 
 ### License
 MIT License - see [LICENSE](LICENSE) for full text
