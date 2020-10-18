@@ -91,7 +91,7 @@ func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error {
 	default:
 	}
 	defer close(r.received)
-
+	//如果接收常规track，即携带对应的ssrc，则直接开启该transceiver的SRTP/SRTCP接收
 	if len(parameters.Encodings) == 1 && parameters.Encodings[0].SSRC != 0 {
 		t := trackStreams{
 			track: &Track{
@@ -108,7 +108,8 @@ func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error {
 		}
 
 		r.tracks = append(r.tracks, t)
-	} else {
+	} else {//如果是接收rid，即simulcast，预先添加track到该transceiver的RTPReceiver，但是在 undeclaredMediaProcessor 函数接收(simulcast的MediaDescription不携带ssrc，sdp协商时无法确定ssrc)
+	//todo:在 undeclaredMediaProcessor 函数里接收
 		for _, encoding := range parameters.Encodings {
 			r.tracks = append(r.tracks, trackStreams{
 				track: &Track{

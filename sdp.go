@@ -152,7 +152,7 @@ func trackDetailsFromSDP(log logging.LeveledLogger, s *sdp.SessionDescription) [
 				}
 			}
 		}
-
+		//simulcast项有msid属性，但是没有ssrc属性，所以其trackDetail中ssrc为空，但是有rid列表
 		if rids := getRids(media); len(rids) != 0 && trackID != "" && trackLabel != "" {
 			newTrack := trackDetails{
 				mid:   midValue,

@@ -1078,12 +1078,16 @@ func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error { 
 	})
 	return nil
 }
-
+//todo: trackDetails包括两种类型的
+// 携带ssrc的，一般常规的track都携带ssrc
+// 不携带ssrc，但是携带rids的，simulcast就属于这一种
 func (pc *PeerConnection) startReceiver(incoming trackDetails, receiver *RTPReceiver) {
 	encodings := []RTPDecodingParameters{}
+	//如果接收track的ssrc不为空，即常规track
 	if incoming.ssrc != 0 {
 		encodings = append(encodings, RTPDecodingParameters{RTPCodingParameters{SSRC: incoming.ssrc}})
 	}
+	//如果接收track存在rid，即simulcast类型
 	for _, rid := range incoming.rids {
 		encodings = append(encodings, RTPDecodingParameters{RTPCodingParameters{RID: rid}})
 	}
@@ -1143,6 +1147,9 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks []trackDetails, curre
 	}
 
 	// Ensure we haven't already started a transceiver for this ssrc
+	//遍历incomingTracks,查看localTransceivers是否有符合条件的 正在接收的 receiver，
+	// 如果有，则说明有对应的receiver 正在接收该ssrc，则移除对应的incomingTrack；
+	// 则剩下的没有移除的incomingTracks就是 没有正在接收的receiver或者 没有receiver与之对应的
 	for i := range incomingTracks {
 		if len(incomingTracks) <= i {
 			break
@@ -1153,11 +1160,12 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks []trackDetails, curre
 			if (t.Receiver()) == nil || t.Receiver().Track() == nil || t.Receiver().Track().ssrc != incomingTrack.ssrc {
 				continue
 			}
-
+			//说明有receiver正在接收该ssrc，则从incomingTracks滤除该track
 			incomingTracks = filterTrackWithSSRC(incomingTracks, incomingTrack.ssrc)
 		}
 	}
-
+	//遍历上一步剩余的incomingTracks，如果存在 可用的还没被用于接收的receiver，则使用该receiver进行接收该ssrc，
+	//否则将该track置为unhandledTrack，加入到unhandledTracks列表
 	unhandledTracks := incomingTracks[:0]
 	for i := range incomingTracks {
 		trackHandled := false
@@ -1185,7 +1193,7 @@ func (pc *PeerConnection) startRTPReceivers(incomingTracks []trackDetails, curre
 			unhandledTracks = append(unhandledTracks, incomingTracks[i])
 		}
 	}
-
+	//如果是planB，对于unhandledTracks，为其添加对应的transceiver启动接收
 	if remoteIsPlanB {
 		for _, incoming := range unhandledTracks {
 			t, err := pc.AddTransceiverFromKind(incoming.kind, RtpTransceiverInit{
@@ -1255,7 +1263,12 @@ func (pc *PeerConnection) startSCTP() {
 	pc.sctpTransport.dataChannelsOpened += openedDCCount
 	pc.sctpTransport.lock.Unlock()
 }
-
+//todo: 对于如何处理未知ssrc的媒体数据
+// 1、获取协商的扩展字段定义，mid与rid
+// 2、读取若干RTP包，获取其扩展字段mid与rid对应的值
+// 3、由mid值获取对应的transceiver
+// 4、再由rid值，从transceiver中获取track
+// 5、构建该rid对应track的stream读取
 func (pc *PeerConnection) handleUndeclaredSSRC(rtpStream io.Reader, ssrc uint32) error { //nolint:gocognit
 	remoteDescription := pc.RemoteDescription()
 	if remoteDescription == nil {
@@ -1294,7 +1307,7 @@ func (pc *PeerConnection) handleUndeclaredSSRC(rtpStream io.Reader, ssrc uint32)
 	if err != nil {
 		return err
 	}
-
+	//获取扩展头信息，mid与rid扩展字段，用来提取未知RTP包的扩展头信息
 	sdesMidExtMap := getExtMapByURI(matchedSDPMap, sdp.SDESMidURI)
 	sdesStreamIDExtMap := getExtMapByURI(matchedSDPMap, sdp.SDESRTPStreamIDURI)
 	if sdesMidExtMap == nil || sdesStreamIDExtMap == nil {
@@ -1303,12 +1316,13 @@ func (pc *PeerConnection) handleUndeclaredSSRC(rtpStream io.Reader, ssrc uint32)
 
 	b := make([]byte, receiveMTU)
 	var mid, rid string
+	//连续读取最多10个RTP包，探测其mid和rid扩展字段值
 	for readCount := 0; readCount <= simulcastProbeCount; readCount++ {
 		i, err := rtpStream.Read(b)
 		if err != nil {
 			return err
 		}
-
+		//尝试获取mid和rid扩展字段值
 		maybeMid, maybeRid, payloadType, err := handleUnknownRTPPacket(b[:i], sdesMidExtMap, sdesStreamIDExtMap)
 		if err != nil {
 			return err
@@ -1324,21 +1338,22 @@ func (pc *PeerConnection) handleUndeclaredSSRC(rtpStream io.Reader, ssrc uint32)
 		if mid == "" || rid == "" {
 			continue
 		}
-
+		//检测payload是否在媒体能力范围内
 		codec, err := pc.api.mediaEngine.getCodec(payloadType)
 		if err != nil {
 			return err
 		}
-
+		//查找所有transceiver中mid匹配的
 		for _, t := range pc.GetTransceivers() {
 			if t.Mid() != mid || t.Receiver() == nil {
 				continue
 			}
-
+			//开始对应mid的transceiver的rid媒体数据的接收
 			track, err := t.Receiver().receiveForRid(rid, codec, ssrc)
 			if err != nil {
 				return err
 			}
+			//触发OnTrack回调，通知应用层
 			pc.onTrack(track, t.Receiver())
 			return nil
 		}
@@ -1348,15 +1363,17 @@ func (pc *PeerConnection) handleUndeclaredSSRC(rtpStream io.Reader, ssrc uint32)
 }
 
 // undeclaredMediaProcessor handles RTP/RTCP packets that don't match any a:ssrc lines
+//todo: 接收未匹配任何ssrc的媒体数据，包括simulcast媒体数据
 func (pc *PeerConnection) undeclaredMediaProcessor() {
 	go func() {
 		for {
+			//比如simulcast未协商ssrc，当simulcast到来时，其ssrc未知，会进入该逻辑
 			srtpSession, err := pc.dtlsTransport.getSRTPSession()
 			if err != nil {
 				pc.log.Warnf("undeclaredMediaProcessor failed to open SrtpSession: %v", err)
 				return
 			}
-
+			//为未知ssrc的RTP流创建RTPstream
 			stream, ssrc, err := srtpSession.AcceptStream()
 			if err != nil {
 				pc.log.Warnf("Failed to accept RTP %v", err)
@@ -1990,7 +2007,9 @@ func (pc *PeerConnection) startTransports(iceRole ICERole, dtlsRole DTLSRole, re
 
 func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDescription, currentTransceivers []*RTPTransceiver) {
 	trackDetails := trackDetailsFromSDP(pc.log, remoteDesc.parsed)
+	//如果是重协商
 	if isRenegotiation {
+		//遍历当前transceiver
 		for _, t := range currentTransceivers {
 			if t.Receiver() == nil || t.Receiver().Track() == nil {
 				continue
@@ -1998,21 +2017,21 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 
 			t.Receiver().Track().mu.Lock()
 			ssrc := t.Receiver().Track().ssrc
-
+			//如果当前transceiver的ssrc在trackDetails依然存在，说明重协商后该ssrc依然被使用，此时只需要修改该transceiver的id和label信息即可，继续使用
 			if details := trackDetailsForSSRC(trackDetails, ssrc); details != nil {
 				t.Receiver().Track().id = details.id
 				t.Receiver().Track().label = details.label
 				t.Receiver().Track().mu.Unlock()
 				continue
 			}
-
+			//如果当前transceiver的ssrc在trackDetails不存在，说明重协商后该ssrc已被删除，此时停止该transceiver的receiver接收，即弃用该receiver
 			t.Receiver().Track().mu.Unlock()
 
 			if err := t.Receiver().Stop(); err != nil {
 				pc.log.Warnf("Failed to stop RtpReceiver: %s", err)
 				continue
 			}
-
+			//重新建立一个相同kind的receiver，绑定到该transceiver，等待下次使用
 			receiver, err := pc.api.NewRTPReceiver(t.Receiver().kind, pc.dtlsTransport)
 			if err != nil {
 				pc.log.Warnf("Failed to create new RtpReceiver: %s", err)
@@ -2029,6 +2048,7 @@ func (pc *PeerConnection) startRTP(isRenegotiation bool, remoteDesc *SessionDesc
 	}
 
 	if !isRenegotiation {
+		//todo: 核心，负责simulcast媒体数据接收
 		pc.undeclaredMediaProcessor()
 	}
 }
