@@ -1,3 +1,5 @@
+// +build !js
+
 package main
 
 import (
@@ -66,18 +68,30 @@ func createPeerConnection(w http.ResponseWriter, r *http.Request) {
 
 // Add a single video track
 func addVideo(w http.ResponseWriter, r *http.Request) {
-	videoTrack, err := peerConnection.NewTrack(
-		webrtc.DefaultPayloadTypeVP8,
-		randutil.NewMathRandomGenerator().Uint32(),
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: "video/vp8"},
 		fmt.Sprintf("video-%d", randutil.NewMathRandomGenerator().Uint32()),
 		fmt.Sprintf("video-%d", randutil.NewMathRandomGenerator().Uint32()),
 	)
 	if err != nil {
 		panic(err)
 	}
-	if _, err = peerConnection.AddTrack(videoTrack); err != nil {
+	rtpSender, err := peerConnection.AddTrack(videoTrack)
+	if err != nil {
 		panic(err)
 	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
 
 	go writeVideoToTrack(videoTrack)
 	doSignaling(w, r)
@@ -121,7 +135,7 @@ func main() {
 
 // Read a video file from disk and write it to a webrtc.Track
 // When the video has been completely read this exits without error
-func writeVideoToTrack(t *webrtc.Track) {
+func writeVideoToTrack(t *webrtc.TrackLocalStaticSample) {
 	// Open a IVF file and start reading using our IVFReader
 	file, err := os.Open("output.ivf")
 	if err != nil {
@@ -144,7 +158,7 @@ func writeVideoToTrack(t *webrtc.Track) {
 		}
 
 		time.Sleep(sleepTime)
-		if err = t.WriteSample(media.Sample{Data: frame, Samples: 90000}); err != nil {
+		if err = t.WriteSample(media.Sample{Data: frame, Duration: time.Second}); err != nil {
 			fmt.Printf("Finish writing video track: %s ", err)
 			return
 		}

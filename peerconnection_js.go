@@ -623,7 +623,7 @@ func valueToSessionDescription(descValue js.Value) *SessionDescription {
 		return nil
 	}
 	return &SessionDescription{
-		Type: newSDPType(descValue.Get("type").String()),
+		Type: NewSDPType(descValue.Get("type").String()),
 		SDP:  descValue.Get("sdp").String(),
 	}
 }
@@ -652,7 +652,7 @@ func iceCandidateInitToValue(candidate ICECandidateInit) js.Value {
 		"candidate":        candidate.Candidate,
 		"sdpMid":           stringPointerToValue(candidate.SDPMid),
 		"sdpMLineIndex":    uint16PointerToValue(candidate.SDPMLineIndex),
-		"usernameFragment": candidate.UsernameFragment,
+		"usernameFragment": stringPointerToValue(candidate.UsernameFragment),
 	})
 }
 

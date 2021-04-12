@@ -12,3 +12,10 @@ type SessionDescription struct {
 	// This will never be initialized by callers, internal use only
 	parsed *sdp.SessionDescription
 }
+
+// Unmarshal is a helper to deserialize the sdp
+func (sd *SessionDescription) Unmarshal() (*sdp.SessionDescription, error) {
+	sd.parsed = &sdp.SessionDescription{}
+	err := sd.parsed.Unmarshal([]byte(sd.SDP))
+	return sd.parsed, err
+}

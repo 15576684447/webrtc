@@ -1,3 +1,5 @@
+// +build !js
+
 package main
 
 import (
@@ -16,9 +18,6 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if peerConnection == nil {
-		m := webrtc.MediaEngine{}
-		m.RegisterDefaultCodecs()
-
 		settingEngine := webrtc.SettingEngine{}
 
 		// Enable support only for TCP ICE candidates.
@@ -42,10 +41,7 @@ func doSignaling(w http.ResponseWriter, r *http.Request) {
 		tcpMux := webrtc.NewICETCPMux(nil, tcpListener, 8)
 		settingEngine.SetICETCPMux(tcpMux)
 
-		api := webrtc.NewAPI(
-			webrtc.WithMediaEngine(m),
-			webrtc.WithSettingEngine(settingEngine),
-		)
+		api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 		if peerConnection, err = api.NewPeerConnection(webrtc.Configuration{}); err != nil {
 			panic(err)
 		}

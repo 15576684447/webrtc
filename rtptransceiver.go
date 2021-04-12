@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 
 	"github.com/pion/rtp"
-	"github.com/pion/sdp/v3"
 )
 
 // RTPTransceiver represents a combination of an RTPSender and an RTPReceiver that share a common mid.
@@ -28,6 +27,12 @@ func (t *RTPTransceiver) Sender() *RTPSender {
 	}
 
 	return nil
+}
+
+// SetSender sets the RTPSender and Track to current transceiver
+func (t *RTPTransceiver) SetSender(s *RTPSender, track TrackLocal) error {
+	t.setSender(s)
+	return t.setSendingTrack(track)
 }
 
 func (t *RTPTransceiver) setSender(s *RTPSender) {
@@ -95,8 +100,10 @@ func (t *RTPTransceiver) setDirection(d RTPTransceiverDirection) {
 	t.direction.Store(d)
 }
 
-func (t *RTPTransceiver) setSendingTrack(track *Track) error {
-	t.Sender().setTrack(track)
+func (t *RTPTransceiver) setSendingTrack(track TrackLocal) error {
+	if err := t.Sender().ReplaceTrack(track); err != nil {
+		return err
+	}
 	if track == nil {
 		t.setSender(nil)
 	}
@@ -108,6 +115,12 @@ func (t *RTPTransceiver) setSendingTrack(track *Track) error {
 		t.setDirection(RTPTransceiverDirectionSendonly)
 	case track == nil && t.Direction() == RTPTransceiverDirectionSendrecv:
 		t.setDirection(RTPTransceiverDirectionRecvonly)
+	case track != nil && t.Direction() == RTPTransceiverDirectionSendonly:
+		// Handle the case where a sendonly transceiver was added by a negotiation
+		// initiated by remote peer. For example a remote peer added a transceiver
+		// with direction recvonly.
+	case track != nil && t.Direction() == RTPTransceiverDirectionSendrecv:
+		// Similar to above, but for sendrecv transceiver.
 	case track == nil && t.Direction() == RTPTransceiverDirectionSendonly:
 		t.setDirection(RTPTransceiverDirectionInactive)
 	default:
@@ -135,7 +148,7 @@ func satisfyTypeAndDirection(remoteKind RTPCodecType, remoteDirection RTPTransce
 		case RTPTransceiverDirectionSendrecv:
 			return []RTPTransceiverDirection{RTPTransceiverDirectionRecvonly, RTPTransceiverDirectionSendrecv}
 		case RTPTransceiverDirectionSendonly:
-			return []RTPTransceiverDirection{RTPTransceiverDirectionRecvonly, RTPTransceiverDirectionSendrecv}
+			return []RTPTransceiverDirection{RTPTransceiverDirectionRecvonly}
 		case RTPTransceiverDirectionRecvonly:
 			return []RTPTransceiverDirection{RTPTransceiverDirectionSendonly, RTPTransceiverDirectionSendrecv}
 		default:
@@ -157,7 +170,7 @@ func satisfyTypeAndDirection(remoteKind RTPCodecType, remoteDirection RTPTransce
 
 // handleUnknownRTPPacket consumes a single RTP Packet and returns information that is helpful
 // for demuxing and handling an unknown SSRC (usually for Simulcast)
-func handleUnknownRTPPacket(buf []byte, sdesMidExtMap, sdesStreamIDExtMap *sdp.ExtMap) (mid, rid string, payloadType uint8, err error) {
+func handleUnknownRTPPacket(buf []byte, midExtensionID, streamIDExtensionID uint8) (mid, rid string, payloadType PayloadType, err error) {
 	rp := &rtp.Packet{}
 	if err = rp.Unmarshal(buf); err != nil {
 		return
@@ -167,12 +180,12 @@ func handleUnknownRTPPacket(buf []byte, sdesMidExtMap, sdesStreamIDExtMap *sdp.E
 		return
 	}
 
-	payloadType = rp.PayloadType
-	if payload := rp.GetExtension(uint8(sdesMidExtMap.Value)); payload != nil {
+	payloadType = PayloadType(rp.PayloadType)
+	if payload := rp.GetExtension(midExtensionID); payload != nil {
 		mid = string(payload)
 	}
 
-	if payload := rp.GetExtension(uint8(sdesStreamIDExtMap.Value)); payload != nil {
+	if payload := rp.GetExtension(streamIDExtensionID); payload != nil {
 		rid = string(payload)
 	}
 

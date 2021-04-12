@@ -1,3 +1,5 @@
+// +build !js
+
 package main
 
 import (
@@ -23,16 +25,6 @@ func main() { // nolint:gocognit
 	signal.Decode(<-sdpChan, &offer)
 	fmt.Println("")
 
-	// Since we are answering use PayloadTypes declared by offerer
-	mediaEngine := webrtc.MediaEngine{}
-	err := mediaEngine.PopulateFromSDP(offer)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create the API object with the MediaEngine
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
@@ -42,7 +34,7 @@ func main() { // nolint:gocognit
 	}
 
 	// Create a new RTCPeerConnection
-	peerConnection, err := api.NewPeerConnection(peerConnectionConfig)
+	peerConnection, err := webrtc.NewPeerConnection(peerConnectionConfig)
 	if err != nil {
 		panic(err)
 	}
@@ -52,23 +44,23 @@ func main() { // nolint:gocognit
 		panic(err)
 	}
 
-	localTrackChan := make(chan *webrtc.Track)
+	localTrackChan := make(chan *webrtc.TrackLocalStaticRTP)
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
-	peerConnection.OnTrack(func(remoteTrack *webrtc.Track, receiver *webrtc.RTPReceiver) {
+	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
 		// This can be less wasteful by processing incoming RTCP events, then we would emit a NACK/PLI when a viewer requests it
 		go func() {
 			ticker := time.NewTicker(rtcpPLIInterval)
 			for range ticker.C {
-				if rtcpSendErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: remoteTrack.SSRC()}}); rtcpSendErr != nil {
+				if rtcpSendErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())}}); rtcpSendErr != nil {
 					fmt.Println(rtcpSendErr)
 				}
 			}
 		}()
 
 		// Create a local track, all our SFU clients will be fed via this track
-		localTrack, newTrackErr := peerConnection.NewTrack(remoteTrack.PayloadType(), remoteTrack.SSRC(), "video", "pion")
+		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, "video", "pion")
 		if newTrackErr != nil {
 			panic(newTrackErr)
 		}
@@ -76,7 +68,7 @@ func main() { // nolint:gocognit
 
 		rtpBuf := make([]byte, 1400)
 		for {
-			i, readErr := remoteTrack.Read(rtpBuf)
+			i, _, readErr := remoteTrack.Read(rtpBuf)
 			if readErr != nil {
 				panic(readErr)
 			}
@@ -126,15 +118,27 @@ func main() { // nolint:gocognit
 		signal.Decode(<-sdpChan, &recvOnlyOffer)
 
 		// Create a new PeerConnection
-		peerConnection, err := api.NewPeerConnection(peerConnectionConfig)
+		peerConnection, err := webrtc.NewPeerConnection(peerConnectionConfig)
 		if err != nil {
 			panic(err)
 		}
 
-		_, err = peerConnection.AddTrack(localTrack)
+		rtpSender, err := peerConnection.AddTrack(localTrack)
 		if err != nil {
 			panic(err)
 		}
+
+		// Read incoming RTCP packets
+		// Before these packets are returned they are processed by interceptors. For things
+		// like NACK this needs to be called.
+		go func() {
+			rtcpBuf := make([]byte, 1500)
+			for {
+				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+			}
+		}()
 
 		// Set the remote SessionDescription
 		err = peerConnection.SetRemoteDescription(recvOnlyOffer)

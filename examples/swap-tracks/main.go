@@ -1,3 +1,5 @@
+// +build !js
+
 package main
 
 import (
@@ -6,7 +8,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/pion/randutil"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -15,30 +16,6 @@ import (
 
 func main() { // nolint:gocognit
 	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
-
-	// Wait for the offer to be pasted
-	offer := webrtc.SessionDescription{}
-	signal.Decode(signal.MustReadStdin(), &offer)
-
-	// We make our own mediaEngine so we can place the sender's codecs in it. Since we are echoing their RTP packet
-	// back to them we are actually codec agnostic - we can accept all their codecs. This also ensures that we use the
-	// dynamic media type from the sender in our answer.
-	mediaEngine := webrtc.MediaEngine{}
-
-	// Add codecs to the mediaEngine. Note that even though we are only going to echo back the sender's video we also
-	// add audio codecs. This is because createAnswer will create an audioTransceiver and associated SDP and we currently
-	// cannot tell it not to. The audio SDP must match the sender's codecs too...
-	err := mediaEngine.PopulateFromSDP(offer)
-	if err != nil {
-		panic(err)
-	}
-
-	videoCodecs := mediaEngine.GetCodecsByKind(webrtc.RTPCodecTypeVideo)
-	if len(videoCodecs) == 0 {
-		panic("Offer contained no video codecs")
-	}
-
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 
 	// Prepare the configuration
 	config := webrtc.Configuration{
@@ -49,34 +26,38 @@ func main() { // nolint:gocognit
 		},
 	}
 	// Create a new RTCPeerConnection
-	peerConnection, err := api.NewPeerConnection(config)
+	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		panic(err)
 	}
 
 	// Create Track that we send video back to browser on
-	outputTrack, err := peerConnection.NewTrack(videoCodecs[0].PayloadType, randutil.NewMathRandomGenerator().Uint32(), "video", "pion")
+	outputTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video", "pion")
 	if err != nil {
 		panic(err)
 	}
 
 	// Add this newly created track to the PeerConnection
-	if _, err = peerConnection.AddTrack(outputTrack); err != nil {
+	rtpSender, err := peerConnection.AddTrack(outputTrack)
+	if err != nil {
 		panic(err)
 	}
 
-	// In addition to the implicit transceiver added by the track, we add two more
-	// for the other tracks
-	_, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo,
-		webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
-	if err != nil {
-		panic(err)
-	}
-	_, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo,
-		webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
-	if err != nil {
-		panic(err)
-	}
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for the offer to be pasted
+	offer := webrtc.SessionDescription{}
+	signal.Decode(signal.MustReadStdin(), &offer)
 
 	// Set the remote SessionDescription
 	err = peerConnection.SetRemoteDescription(offer)
@@ -92,8 +73,8 @@ func main() { // nolint:gocognit
 	packets := make(chan *rtp.Packet, 60)
 
 	// Set a handler for when a new remote track starts
-	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
-		fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), track.Codec().Name)
+	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), track.Codec().MimeType)
 		trackNum := trackCount
 		trackCount++
 		// The last timestamp so that we can change the packet to only be the delta
@@ -104,7 +85,7 @@ func main() { // nolint:gocognit
 		var isCurrTrack bool
 		for {
 			// Read RTP packets being sent to Pion
-			rtp, readErr := track.ReadRTP()
+			rtp, _, readErr := track.ReadRTP()
 			if readErr != nil {
 				panic(readErr)
 			}
@@ -123,7 +104,7 @@ func main() { // nolint:gocognit
 				// If just switched to this track, send PLI to get picture refresh
 				if !isCurrTrack {
 					isCurrTrack = true
-					if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}}); writeErr != nil {
+					if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}}); writeErr != nil {
 						fmt.Println(writeErr)
 					}
 				}
@@ -158,8 +139,7 @@ func main() { // nolint:gocognit
 	// in a production application you should exchange ICE Candidates via OnICECandidate
 	<-gatherComplete
 
-	// Output the answer in base64 so we can paste it in browser
-	fmt.Printf("Paste below base64 in browser:\n%v\n", signal.Encode(*peerConnection.LocalDescription()))
+	fmt.Println(signal.Encode(*peerConnection.LocalDescription()))
 
 	// Asynchronously take all packets in the channel and write them out to our
 	// track
@@ -170,8 +150,6 @@ func main() { // nolint:gocognit
 			// Timestamp on the packet is really a diff, so add it to current
 			currTimestamp += packet.Timestamp
 			packet.Timestamp = currTimestamp
-			// Set the output SSRC
-			packet.SSRC = outputTrack.SSRC()
 			// Keep an increasing sequence number
 			packet.SequenceNumber = i
 			// Write out the packet, ignoring closed pipe if nobody is listening

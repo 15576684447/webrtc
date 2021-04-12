@@ -1,3 +1,5 @@
+// +build !js
+
 package main
 
 import (
@@ -6,32 +8,51 @@ import (
 	"net"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/examples/internal/signal"
 )
 
 type udpConn struct {
-	conn *net.UDPConn
-	port int
+	conn        *net.UDPConn
+	port        int
+	payloadType uint8
 }
 
 func main() {
-	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
 
 	// Create a MediaEngine object to configure the supported codec
-	m := webrtc.MediaEngine{}
+	m := &webrtc.MediaEngine{}
 
 	// Setup the codecs you want to use.
-	// We'll use a VP8 codec but you can also define your own
-	m.RegisterCodec(webrtc.NewRTPOpusCodec(webrtc.DefaultPayloadTypeOpus, 48000))
-	m.RegisterCodec(webrtc.NewRTPVP8Codec(webrtc.DefaultPayloadTypeVP8, 90000))
+	// We'll use a VP8 and Opus but you can also define your own
+	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/VP8", ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		panic(err)
+	}
+	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "audio/opus", ClockRate: 48000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		panic(err)
+	}
+
+	// Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
+	// This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
+	// this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
+	// for each PeerConnection.
+	i := &interceptor.Registry{}
+
+	// Use the default set of Interceptors
+	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+		panic(err)
+	}
 
 	// Create the API object with the MediaEngine
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
-
-	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i))
 
 	// Prepare the configuration
 	config := webrtc.Configuration{
@@ -62,9 +83,11 @@ func main() {
 	}
 
 	// Prepare udp conns
+	// Also update incoming packets with expected PayloadType, the browser may use
+	// a different value. We have to modify so our stream matches what rtp-forwarder.sdp expects
 	udpConns := map[string]*udpConn{
-		"audio": {port: 4000},
-		"video": {port: 4002},
+		"audio": {port: 4000, payloadType: 111},
+		"video": {port: 4002, payloadType: 96},
 	}
 	for _, c := range udpConns {
 		// Create remote addr
@@ -87,7 +110,7 @@ func main() {
 	// Set a handler for when a new remote track starts, this handler will forward data to
 	// our UDP listeners.
 	// In your application this is where you would handle/process audio/video
-	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		// Retrieve udp connection
 		c, ok := udpConns[track.Kind().String()]
 		if !ok {
@@ -98,18 +121,30 @@ func main() {
 		go func() {
 			ticker := time.NewTicker(time.Second * 2)
 			for range ticker.C {
-				if rtcpErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}}); rtcpErr != nil {
+				if rtcpErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}}); rtcpErr != nil {
 					fmt.Println(rtcpErr)
 				}
 			}
 		}()
 
 		b := make([]byte, 1500)
+		rtpPacket := &rtp.Packet{}
 		for {
 			// Read
-			n, readErr := track.Read(b)
+			n, _, readErr := track.Read(b)
 			if readErr != nil {
 				panic(readErr)
+			}
+
+			// Unmarshal the packet and update the PayloadType
+			if err = rtpPacket.Unmarshal(b[:n]); err != nil {
+				panic(err)
+			}
+			rtpPacket.PayloadType = c.payloadType
+
+			// Marshal into original buffer with updated PayloadType
+			if n, err = rtpPacket.MarshalTo(b); err != nil {
+				panic(err)
 			}
 
 			// Write
@@ -127,6 +162,9 @@ func main() {
 			}
 		}
 	})
+
+	// Create context
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// Set the handler for ICE connection state
 	// This will notify you when the peer has connected/disconnected

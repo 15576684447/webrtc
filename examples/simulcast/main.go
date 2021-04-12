@@ -1,61 +1,21 @@
+// +build !js
+
 package main
 
 import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"time"
 
-	"github.com/pion/randutil"
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
-	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/examples/internal/signal"
 )
 
 func main() {
 	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
-
-	// Wait for the offer to be pasted
-	offer := webrtc.SessionDescription{}
-	signal.Decode(signal.MustReadStdin(), &offer)
-
-	// We make our own mediaEngine so we can place the sender's codecs in it. Since we are echoing their RTP packet
-	// back to them we are actually codec agnostic - we can accept all their codecs. This also ensures that we use the
-	// dynamic media type from the sender in our answer.
-	mediaEngine := webrtc.MediaEngine{}
-
-	// Add codecs to the mediaEngine. Note that even though we are only going to echo back the sender's video we also
-	// add audio codecs. This is because createAnswer will create an audioTransceiver and associated SDP and we currently
-	// cannot tell it not to. The audio SDP must match the sender's codecs too...
-	err := mediaEngine.PopulateFromSDP(offer)
-	if err != nil {
-		panic(err)
-	}
-
-	videoCodecs := mediaEngine.GetCodecsByKind(webrtc.RTPCodecTypeVideo)
-	if len(videoCodecs) == 0 {
-		panic("Offer contained no video codecs")
-	}
-
-	// Configure required extensions
-
-	sdes, _ := url.Parse(sdp.SDESRTPStreamIDURI)
-	sdedMid, _ := url.Parse(sdp.SDESMidURI)
-	exts := []sdp.ExtMap{
-		{
-			URI: sdes,
-		},
-		{
-			URI: sdedMid,
-		},
-	}
-
-	se := webrtc.SettingEngine{}
-	se.AddSDPExtensions(webrtc.SDPSectionVideo, exts)
-
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine((se)))
 
 	// Prepare the configuration
 	config := webrtc.Configuration{
@@ -65,28 +25,55 @@ func main() {
 			},
 		},
 	}
+
+	// Enable Extension Headers needed for Simulcast
+	m := &webrtc.MediaEngine{}
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		panic(err)
+	}
+	for _, extension := range []string{
+		"urn:ietf:params:rtp-hdrext:sdes:mid",
+		"urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
+		"urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id",
+	} {
+		if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: extension}, webrtc.RTPCodecTypeVideo); err != nil {
+			panic(err)
+		}
+	}
+
+	// Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
+	// This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
+	// this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
+	// for each PeerConnection.
+	i := &interceptor.Registry{}
+
+	// Use the default set of Interceptors
+	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+		panic(err)
+	}
+
 	// Create a new RTCPeerConnection
-	peerConnection, err := api.NewPeerConnection(config)
+	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(config)
 	if err != nil {
 		panic(err)
 	}
 
-	outputTracks := map[string]*webrtc.Track{}
+	outputTracks := map[string]*webrtc.TrackLocalStaticRTP{}
 
 	// Create Track that we send video back to browser on
-	outputTrack, err := peerConnection.NewTrack(videoCodecs[0].PayloadType, randutil.NewMathRandomGenerator().Uint32(), "video_q", "pion_q")
+	outputTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video_q", "pion_q")
 	if err != nil {
 		panic(err)
 	}
 	outputTracks["q"] = outputTrack
 
-	outputTrack, err = peerConnection.NewTrack(videoCodecs[0].PayloadType, randutil.NewMathRandomGenerator().Uint32(), "video_h", "pion_h")
+	outputTrack, err = webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video_h", "pion_h")
 	if err != nil {
 		panic(err)
 	}
 	outputTracks["h"] = outputTrack
 
-	outputTrack, err = peerConnection.NewTrack(videoCodecs[0].PayloadType, randutil.NewMathRandomGenerator().Uint32(), "video_f", "pion_f")
+	outputTrack, err = webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video_f", "pion_f")
 	if err != nil {
 		panic(err)
 	}
@@ -103,12 +90,31 @@ func main() {
 		panic(err)
 	}
 
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	processRTCP := func(rtpSender *webrtc.RTPSender) {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}
+	for _, rtpSender := range peerConnection.GetSenders() {
+		go processRTCP(rtpSender)
+	}
+
+	// Wait for the offer to be pasted
+	offer := webrtc.SessionDescription{}
+	signal.Decode(signal.MustReadStdin(), &offer)
+
 	if err = peerConnection.SetRemoteDescription(offer); err != nil {
 		panic(err)
 	}
 
 	// Set a handler for when a new remote track starts
-	peerConnection.OnTrack(func(track *webrtc.Track, receiver *webrtc.RTPReceiver) {
+	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		fmt.Println("Track has started")
 
 		// Start reading from all the streams and sending them to the related output track
@@ -117,24 +123,17 @@ func main() {
 			ticker := time.NewTicker(3 * time.Second)
 			for range ticker.C {
 				fmt.Printf("Sending pli for stream with rid: %q, ssrc: %d\n", track.RID(), track.SSRC())
-				if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: track.SSRC()}}); writeErr != nil {
-					fmt.Println(writeErr)
-				}
-				// Send a remb message with a very high bandwidth to trigger chrome to send also the high bitrate stream
-				fmt.Printf("Sending remb for stream with rid: %q, ssrc: %d\n", track.RID(), track.SSRC())
-				if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.ReceiverEstimatedMaximumBitrate{Bitrate: 10000000, SenderSSRC: track.SSRC()}}); writeErr != nil {
+				if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}}); writeErr != nil {
 					fmt.Println(writeErr)
 				}
 			}
 		}()
 		for {
 			// Read RTP packets being sent to Pion
-			packet, readErr := track.ReadRTP()
+			packet, _, readErr := track.ReadRTP()
 			if readErr != nil {
 				panic(readErr)
 			}
-
-			packet.SSRC = outputTracks[rid].SSRC()
 
 			if writeErr := outputTracks[rid].WriteRTP(packet); writeErr != nil && !errors.Is(writeErr, io.ErrClosedPipe) {
 				panic(writeErr)
@@ -152,14 +151,22 @@ func main() {
 		panic(err)
 	}
 
+	// Create channel that is blocked until ICE Gathering is complete
+	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
+
 	// Sets the LocalDescription, and starts our UDP listeners
 	err = peerConnection.SetLocalDescription(answer)
 	if err != nil {
 		panic(err)
 	}
 
+	// Block until ICE Gathering is complete, disabling trickle ICE
+	// we do this because we only can exchange one signaling message
+	// in a production application you should exchange ICE Candidates via OnICECandidate
+	<-gatherComplete
+
 	// Output the answer in base64 so we can paste it in browser
-	fmt.Printf("Paste below base64 in browser:\n%v\n", signal.Encode(answer))
+	fmt.Println(signal.Encode(*peerConnection.LocalDescription()))
 
 	// Block forever
 	select {}
