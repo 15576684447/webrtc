@@ -29,16 +29,6 @@ var (
 	errNoTransceiverwithMid      = errors.New("no transceiver with mid")
 )
 
-func offerMediaHasDirection(offer SessionDescription, kind RTPCodecType, direction RTPTransceiverDirection) bool {
-	for _, media := range offer.parsed.MediaDescriptions {
-		if media.MediaName.Media == kind.String() {
-			_, exists := media.Attribute(direction.String())
-			return exists
-		}
-	}
-	return false
-}
-
 /*
 Integration test for bi-directional peers
 
@@ -220,12 +210,12 @@ func TestPeerConnection_Media_Shutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = pcOffer.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
+	_, err = pcOffer.AddTransceiverFromKind(RTPCodecTypeVideo, RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeAudio, RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
+	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeAudio, RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +471,7 @@ func TestAddTransceiverFromTrackSendOnly(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	transceiver, err := pc.AddTransceiverFromTrack(track, RtpTransceiverInit{
+	transceiver, err := pc.AddTransceiverFromTrack(track, RTPTransceiverInit{
 		Direction: RTPTransceiverDirectionSendonly,
 	})
 	if err != nil {
@@ -537,7 +527,7 @@ func TestAddTransceiverFromTrackSendRecv(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	transceiver, err := pc.AddTransceiverFromTrack(track, RtpTransceiverInit{
+	transceiver, err := pc.AddTransceiverFromTrack(track, RTPTransceiverInit{
 		Direction: RTPTransceiverDirectionSendrecv,
 	})
 	if err != nil {
@@ -567,52 +557,13 @@ func TestAddTransceiverFromTrackSendRecv(t *testing.T) {
 	assert.NoError(t, pc.Close())
 }
 
-// nolint: dupl
-func TestAddTransceiver(t *testing.T) {
-	lim := test.TimeOut(time.Second * 30)
-	defer lim.Stop()
-
-	report := test.CheckRoutines(t)
-	defer report()
-
-	pc, err := NewPeerConnection(Configuration{})
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	transceiver, err := pc.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{
-		Direction: RTPTransceiverDirectionSendrecv,
-	})
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	if transceiver.Receiver() == nil {
-		t.Errorf("Transceiver should have a receiver")
-	}
-
-	if transceiver.Sender() == nil {
-		t.Errorf("Transceiver should have a sender")
-	}
-
-	offer, err := pc.CreateOffer(nil)
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	if !offerMediaHasDirection(offer, RTPCodecTypeVideo, RTPTransceiverDirectionSendrecv) {
-		t.Errorf("Direction on SDP is not %s", RTPTransceiverDirectionSendrecv)
-	}
-	assert.NoError(t, pc.Close())
-}
-
 func TestAddTransceiverAddTrack_Reuse(t *testing.T) {
 	pc, err := NewPeerConnection(Configuration{})
 	assert.NoError(t, err)
 
 	tr, err := pc.AddTransceiverFromKind(
 		RTPCodecTypeVideo,
-		RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly},
+		RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly},
 	)
 	assert.NoError(t, err)
 
@@ -650,7 +601,7 @@ func TestAddTransceiverAddTrack_NewRTPSender_Error(t *testing.T) {
 
 	_, err = pc.AddTransceiverFromKind(
 		RTPCodecTypeVideo,
-		RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly},
+		RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly},
 	)
 	assert.NoError(t, err)
 
@@ -675,7 +626,7 @@ func TestRtpSenderReceiver_ReadClose_Error(t *testing.T) {
 
 	tr, err := pc.AddTransceiverFromKind(
 		RTPCodecTypeVideo,
-		RtpTransceiverInit{Direction: RTPTransceiverDirectionSendrecv},
+		RTPTransceiverInit{Direction: RTPTransceiverDirectionSendrecv},
 	)
 	assert.NoError(t, err)
 
@@ -704,7 +655,7 @@ func TestAddTransceiverFromKind(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	transceiver, err := pc.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{
+	transceiver, err := pc.AddTransceiverFromKind(RTPCodecTypeVideo, RTPTransceiverInit{
 		Direction: RTPTransceiverDirectionRecvonly,
 	})
 	if err != nil {
@@ -730,30 +681,6 @@ func TestAddTransceiverFromKind(t *testing.T) {
 	assert.NoError(t, pc.Close())
 }
 
-func TestAddTransceiverFromKindFailsSendOnly(t *testing.T) {
-	lim := test.TimeOut(time.Second * 30)
-	defer lim.Stop()
-
-	report := test.CheckRoutines(t)
-	defer report()
-
-	pc, err := NewPeerConnection(Configuration{})
-	if err != nil {
-		t.Error(err.Error())
-	}
-
-	transceiver, err := pc.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{
-		Direction: RTPTransceiverDirectionSendonly,
-	})
-
-	if transceiver != nil {
-		t.Error("AddTransceiverFromKind shouldn't succeed with Direction RTPTransceiverDirectionSendonly")
-	}
-
-	assert.NotNil(t, err)
-	assert.NoError(t, pc.Close())
-}
-
 func TestAddTransceiverFromTrackFailsRecvOnly(t *testing.T) {
 	lim := test.TimeOut(time.Second * 30)
 	defer lim.Stop()
@@ -775,7 +702,7 @@ func TestAddTransceiverFromTrackFailsRecvOnly(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	transceiver, err := pc.AddTransceiverFromTrack(track, RtpTransceiverInit{
+	transceiver, err := pc.AddTransceiverFromTrack(track, RTPTransceiverInit{
 		Direction: RTPTransceiverDirectionRecvonly,
 	})
 
@@ -936,7 +863,7 @@ func TestPeerConnection_Start_Right_Receiver(t *testing.T) {
 	pcOffer, pcAnswer, err := newPair()
 	require.NoError(t, err)
 
-	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
+	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeVideo, RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
 	assert.NoError(t, err)
 
 	track1, err := NewTrackLocalStaticSample(RTPCodecCapability{MimeType: "video/vp8"}, "video", "pion1")
@@ -972,7 +899,7 @@ func TestPeerConnection_Start_Right_Receiver(t *testing.T) {
 	_, err = pcOffer.AddTransceiverFromTrack(track1)
 	assert.NoError(t, err)
 
-	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeVideo, RtpTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
+	_, err = pcAnswer.AddTransceiverFromKind(RTPCodecTypeVideo, RTPTransceiverInit{Direction: RTPTransceiverDirectionRecvonly})
 	assert.NoError(t, err)
 
 	assert.NoError(t, signalPair(pcOffer, pcAnswer))

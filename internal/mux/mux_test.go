@@ -106,6 +106,10 @@ func (m *muxErrorConn) Read(b []byte) (n int, err error) {
    pion/webrtc#1720
 */
 func TestNonFatalRead(t *testing.T) {
+	// Limit runtime in case of deadlocks
+	lim := test.TimeOut(time.Second * 20)
+	defer lim.Stop()
+
 	expectedData := []byte("expectedData")
 
 	// In memory pipe
@@ -141,4 +145,30 @@ func TestNonFatalRead(t *testing.T) {
 	<-m.closedCh
 	assert.NoError(t, m.Close())
 	assert.NoError(t, ca.Close())
+}
+
+func BenchmarkDispatch(b *testing.B) {
+	m := &Mux{
+		endpoints: make(map[*Endpoint]MatchFunc),
+		log:       logging.NewDefaultLoggerFactory().NewLogger("mux"),
+	}
+
+	e := m.NewEndpoint(MatchSRTP)
+	m.NewEndpoint(MatchSRTCP)
+
+	buf := []byte{128, 1, 2, 3, 4}
+	buf2 := make([]byte, 1200)
+
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		err := m.dispatch(buf)
+		if err != nil {
+			b.Errorf("dispatch: %v", err)
+		}
+		_, err = e.buffer.Read(buf2)
+		if err != nil {
+			b.Errorf("read: %v", err)
+		}
+	}
 }
